@@ -2,6 +2,9 @@
 
 `krtk.rs` is a high-performance, serverless URL shortener built with Rust and AWS CDK. Running fully AWS. 
 
+> ⚠️ THIS IS NOT PRODUCTION READY ⚠️
+> There is no authentication implemented yet. So feel free to explore this project and tinker with it, but it would be unwise to implement this in any sort of production capacity. You have been warned.
+
 This project demonstrates the integration of Rust-based Lambda functions with AWS services like API Gateway, DynamoDB, and CloudFront to create a scalable and responsive web application. The infrastructure is defined as code using AWS CDK, enabling easy deployment and management.
 
 Huge shout out to [Luciano](https://www.linkedin.com/in/lucianomammino/) and [James](https://www.linkedin.com/in/james-eastham/) for making the [Crafing Lambda Functions in Rust book](https://rust-lambda.com/) which enabled me to build this. 👏
