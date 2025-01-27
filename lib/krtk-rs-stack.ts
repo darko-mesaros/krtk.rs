@@ -1,16 +1,16 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { RustFunction } from 'cargo-lambda-cdk';
-import { HttpApi, HttpMethod, CorsHttpMethod, DomainName, ApiMapping, HttpStage, ThrottleSettings } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpApi, HttpMethod, CorsHttpMethod, HttpStage, ThrottleSettings } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
-import { HostedZone, ARecord, RecordTarget, CnameRecord } from 'aws-cdk-lib/aws-route53';
-import { Certificate, CertificateValidation } from 'aws-cdk-lib/aws-certificatemanager';
+import { HostedZone, ARecord, RecordTarget } from 'aws-cdk-lib/aws-route53';
+import { Certificate} from 'aws-cdk-lib/aws-certificatemanager';
 import { TableV2, AttributeType } from 'aws-cdk-lib/aws-dynamodb';
-import { ApiGatewayv2DomainProperties, CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
+import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { Bucket, BlockPublicAccess } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
-import { HttpOrigin, S3BucketOrigin, S3StaticWebsiteOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { HttpOrigin, S3StaticWebsiteOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 
 interface KrtkRsStackProps extends cdk.StackProps {
   certificateArn: string;
@@ -28,13 +28,6 @@ export class KrtkRsStack extends cdk.Stack {
       zoneName: 'krtk.rs',
       hostedZoneId: 'Z07540833AST0TH4M5W39',
     })
-
-    // // Domain
-    // const tld = new DomainName(this, 'tld',{
-    //   domainName: 'krtk.rs',
-    //   certificate: cert,
-    // });
-
 
     // S3 Hosting
     const hostingBucket = new Bucket(this, 'hostingBucket',{
@@ -56,10 +49,6 @@ export class KrtkRsStack extends cdk.Stack {
       sources: [Source.asset('./website')],
       destinationBucket: hostingBucket
     });
-
-    // const originAccessIdentity = new OriginAccessIdentity(this, 'originAccessIdentity');
-    // hostingBucket.grantRead(originAccessIdentity);
-
 
     // DynamoDB
     const linkDatabase = new TableV2(this, 'linkTable', {
@@ -121,31 +110,15 @@ export class KrtkRsStack extends cdk.Stack {
       rateLimit: 5, // 5 requests per second
       burstLimit: 10, // 10 concurrent requests max
     }
-    const prodStage = new HttpStage(this, 'prodStage', {
+
+    // Prod Stage
+    new HttpStage(this, 'prodStage', {
       httpApi: api,
       stageName: 'prod',
       description: 'Production stage',
       throttle: prodThrottle,
       autoDeploy: true,
     });
-
-
-    // new ApiMapping(this, 'apiMapping', {
-    //   api,
-    //   domainName: tld,
-    //   stage: api.defaultStage!,
-    // });
-    //
-    // new ARecord(this, 'apiAliasRecord',{
-    //   zone: hostedZone,
-    //   target: RecordTarget.fromAlias(
-    //     new ApiGatewayv2DomainProperties(
-    //       tld.regionalDomainName,
-    //       tld.regionalHostedZoneId,
-    //     )
-    //   ),
-    //   recordName: 'krtk.rs'
-    // });
 
     // Integrations
     const createLinkInteg = new HttpLambdaIntegration('createLinkInteg', createLinkLambda);

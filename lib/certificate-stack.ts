@@ -8,8 +8,9 @@ export class CertificateStack extends cdk.Stack {
     super(scope, id, props);
 
     // Route53
+    // TODO: Remove the hardcoded domain and HostedZoneId
     const hostedZone = HostedZone.fromHostedZoneAttributes(this, 'hostedZone',{
-      zoneName: 'krtk.rs',
+      zoneName: 'krtk.rs', 
       hostedZoneId: 'Z07540833AST0TH4M5W39',
     })
 
