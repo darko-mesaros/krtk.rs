@@ -9,3 +9,6 @@ cdk.out
 
 # Rust
 target
+
+# Website
+!website/assets/*.js
