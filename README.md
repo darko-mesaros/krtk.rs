@@ -1,4 +1,4 @@
-# krtk-rs: A Serverless URL Shortener with Rust and AWS CDK
+# krtk-rs: A Serverless URL Shortener
 
 `krtk.rs` is a high-performance, serverless URL shortener built with Rust and AWS CDK. Running fully AWS. 
 
