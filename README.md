@@ -109,6 +109,8 @@ After deployment, you can use the URL shortener by:
   +--- [S3 (Static Website)]
 ```
 
+![Architecture diagram of krtk.rs](/img/arch.png)
+
 ## Infrastructure 🏗️
 
 The project uses AWS CDK to define and deploy the following resources:
