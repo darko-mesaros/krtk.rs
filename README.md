@@ -28,6 +28,10 @@ Huge shout out to [Luciano](https://www.linkedin.com/in/lucianomammino/) and [Ja
     └── krtk-rs.test.ts         # Tests for the CDK stack (not yet implemented)
 ```
 
+## Look and feel
+
+![Screenshot of krtk.rs](/img/screen.png)
+
 ## Usage Instructions
 
 ### Prerequisites 📋
