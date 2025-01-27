@@ -1,0 +1,79 @@
+use lambda_http::http::StatusCode;
+use lambda_http::{run, service_fn, tracing, Error, IntoResponse, Request, RequestPayloadExt};
+
+use shared::core::{ShortenUrlRequest, UrlShortener};
+use shared::response::{empty_response, json_response};
+use shared::url_info::UrlInfo;
+
+use std::env;
+
+// The main bit of code that will run every time this function is triggered
+async fn function_handler(
+    url_shortener: &UrlShortener,
+    url_info: &UrlInfo,
+    event: Request,
+) -> Result<impl IntoResponse, Error> {
+    // Tracing
+    tracing::info!("Received event: {:?}", event);
+
+    // Get the Request
+    let shorten_url_request_body = event.payload::<ShortenUrlRequest>()?;
+
+    match shorten_url_request_body {
+        // If it cannot parse the payload (no "url_to_shorten")
+        None => empty_response(&StatusCode::BAD_REQUEST),
+        // Was able to parse the payload, lets shorten it
+        Some(shorten_url_request) => {
+            match shorten_url_request.validate() {
+                Ok(ser) => {
+                    let shortened_url_response = url_shortener
+                        .shorten_url(ser, url_info)
+                        .await;
+
+                    // See if we managed to shorten it
+                    match shortened_url_response {
+                        // Yes, return the JSON back
+                        Ok(response) => json_response(&StatusCode::OK, &response),
+                        // No, fail spectacularly
+                        Err(e) => {
+                            tracing::error!("Failed to shorten URL 💥 : {:?}", e);
+                            empty_response(&StatusCode::INTERNAL_SERVER_ERROR)
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to validate URL 💥 : {:?}", e);
+                    empty_response(&StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    tracing::init_default_subscriber();
+
+    // Get the table name from the env variables
+    let table_name = env::var("TABLE_NAME").expect("No TABLE_NAME environment variable set");
+    // Set up the AWS DynamoDB SDK Client
+    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
+
+    // Http Client for retrieving additional information from the posted URLs
+    // NOTE: We are using the shared reqwest from the shared library - re:export
+    let http_client = shared::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?;
+
+    // Instantiate UrlInfo
+    let url_info = UrlInfo::new(http_client);
+
+    // Creating a new UrlShortener struct with defaults
+    let shortener = UrlShortener::new(&table_name, dynamodb_client);
+
+    run(service_fn(|event| {
+        function_handler(&shortener, &url_info, event)
+    }))
+    .await
+}
