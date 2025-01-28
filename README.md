@@ -143,19 +143,26 @@ The project uses AWS CDK to define and deploy the following resources:
 
 ## TODO 📋
 
-Some stuff that needs to be implemented for this to be fully production ready
+Here is the stuff that need to be implemented to make this project production-ready:
 
-- [ ] Domain name as parameter 
-> Allows me to change the tld from krtk.rs to something else
-- [ ] Handle when we want to get the title and get "BLOCKED" or CloudFlare'd 
-> Some websites do not allow to be scraped
-- [ ] Create a DEV stage 
-> Currently the PROD stage (the entire stack) is very much devlike
-- [ ] Implement Auth 
-> Use [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools.html)
-- [ ] Can we use shorter links? 
-> The URL generated seems too long. Figure out shorter UUID
-- [ ] Tag all resources 
-> make sure all the resources in the stack
-- [] Further break down stacks
-> Have a Lambda stack, a data stack ...
+### Infrastructure Improvements 🏗️
+- [ ] **Domain name as parameter**: Allow changing the TLD from `krtk.rs` to something else.
+- [ ] **Create a DEV stage**: Currently, the PROD stage is very much dev-like. A dedicated DEV stage would be useful for testing.
+- [ ] **Tag all resources**: Ensure all resources in the stack are properly tagged for better management.
+- [ ] **Further break down stacks**: Consider having separate stacks for Lambda, data, etc., for better modularity.
+
+### Feature Enhancements 🚀
+- [ ] **Handle blocked websites**: Improve handling when scraping website titles and images, especially when blocked by Cloudflare or other protections.
+- [ ] **Implement Auth**: Use [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools.html) to add authentication.
+- [ ] **Shorter links**: Investigate ways to generate shorter URLs (e.g., shorter UUIDs or custom short codes).
+
+### Documentation & Testing 📚
+- [ ] **Add tests for CDK stack**: Currently, the tests for the CDK stack are not implemented.
+- [ ] **Improve documentation**: Add more detailed documentation for deployment, usage, and troubleshooting.
+
+### Future Ideas 💡
+- [ ] **Analytics**: Add basic analytics to track link usage (e.g., number of clicks, geographic data).
+- [ ] **Custom domains**: Allow users to use custom domains for their shortened links.
+
+### HTMX 🌐
+- [ ] **Optimize for HTMX**: Instead of returning JSON, I should have the ability to return pure HTML and have it just handled by HTMX
