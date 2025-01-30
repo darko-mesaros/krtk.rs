@@ -30,10 +30,12 @@ async fn function_handler(
     match links {
         Ok(links) if htmx_request.is_some() => {
                 tracing::info!("Request is HTMX");
+                // TODO: Make this more compact and handle the Results
                 let links_str = serde_json::to_value(&links)?;
                 let table_links: Vec<Link> = serde_json::from_value(links_str["short_urls"].clone())?;
                 let table_html = LinksTable {
                     links: table_links,
+                    // TODO: Make this not hardcoded
                     domain: "krtk.rs/"
                 };
                 let body = table_html.render()?;
