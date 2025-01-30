@@ -18,12 +18,16 @@
                     <h1 class="text-3xl font-bold m-0">krtk.rs</h1>
                 </div>
 
-                <form hx-post="/api/links"
+                <form id="shorten-form"
+                      hx-post="/api/links"
                       hx-trigger="submit"
                       hx-swap="none"
                       hx-target="#result"
                       hx-indicator=".loader"
-                      hx-on::after-request="if(event.detail.successful) { fetchLinks(); this.reset(); }">
+                      hx-on::after-request="if(event.detail.successful) {
+                        this.reset();
+                        htmx.trigger('#link-list', 'refreshLinks')
+                      }">
                     <div class="flex gap-3 mb-6">
                         <input type="text"
                                id="url_input"
@@ -39,26 +43,18 @@
                     </div>
                 </form>
 
+                <!-- Shortened URL -->
                 <div class="loader hidden items-center gap-3 my-4">
                     <div class="w-5 h-5 border-3 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
                     <span class="text-gray-600">Shortening URL ...</span>
                 </div>
-
                 <div id="result" class="mb-6"></div>
 
+                <!-- All shortened URLs -->
                 <h3 class="text-xl font-semibold mb-4">Shortened links</h3>
-                <table class="w-full">
-                    <thead>
-                        <tr class="border-b">
-                            <th class="py-3 px-4 text-left bg-gray-50">Title</th>
-                            <th class="py-3 px-4 text-left bg-gray-50">Short Link</th>
-                            <th class="py-3 px-4 text-left bg-gray-50">Clicks</th>
-                        </tr>
-                    </thead>
-                    <tbody id="linksTable" class="divide-y">
-                        <!-- Links will be inserted here -->
-                    </tbody>
-                </table>
+                <div id="link-list" hx-get="/api/links" hx-trigger="load, refreshLinks">
+                  Loading links...
+                </div>
             </div>
         </div>
     </main>
