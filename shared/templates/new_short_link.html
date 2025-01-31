@@ -1,8 +1,18 @@
-<div class="text-green-600">
+<div class="flex items-center space-x-4 p-4 bg-green-200 rounded-lg shadow">
+  <div class="text-lg font-medium">
     Short URL: 
+  </div>
+  <div class= "flex items-center space-x-2">
     <a href="https://{{domain}}{{link}}" 
        target="_blank"
-       class="text-blue-600 hover:text-blue-800">
+       class="text-blue-600 hover:text-blue-800 underline truncate max-w-xs">
     https://{{domain}}{{link}}
     </a>
+    <button class="copy-icon ml-2 flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 focus:outline-none" 
+            data-url="https://{{ domain }}{{ link}}"
+            title="Copy to Clipboard"
+            onclick="copyToClipboard('https://{{ domain }}{{link}}')">
+        <i class="fas fa-copy text-sm"></i>
+    </button>
+  </div>
 </div>
