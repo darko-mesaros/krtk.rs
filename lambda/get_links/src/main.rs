@@ -38,8 +38,8 @@ async fn function_handler(
                     // TODO: Make this not hardcoded
                     domain: "krtk.rs/"
                 };
-                let body = table_html.render()?;
-                html_response(&StatusCode::OK, body)
+                let body = table_html.render()?; // Render HTML
+                html_response(&StatusCode::OK, body) // Respond with HTML
         },
         Ok(links) => json_response(&StatusCode::OK, &links),
         Err(e) => {
