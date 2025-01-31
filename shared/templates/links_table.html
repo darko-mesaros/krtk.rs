@@ -9,8 +9,8 @@
     <tbody id="linksTable" class="divide-y">
         {% for link in links %}
         <tr>
-          <td class="py-3 px-4">{% if let Some(title) = link.title %}{{ title }}{% endif %}</td>
-            <td class="py-3 px-4">
+          <td class="py-1 px-2">{% if let Some(title) = link.title %}{{ title }}{% endif %}</td>
+            <td class="py-1 px-2">
                 <div class="flex items-center justify-between w-full">
                   <a href="https://{{ domain }}{{ link.link_id }}" 
                        target="_blank"
