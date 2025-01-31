@@ -2,7 +2,7 @@
     <thead>
         <tr class="border-b">
             <th class="py-3 px-4 text-left bg-gray-50">Title</th>
-            <th class="py-3 px-4 text-left bg-gray-50">Short Link</th>
+            <th class="py-3 px-4 text-left bg-gray-50 w-48">Short Link</th>
             <th class="py-3 px-4 text-left bg-gray-50">Clicks</th>
         </tr>
     </thead>
@@ -11,15 +11,16 @@
         <tr>
           <td class="py-3 px-4">{% if let Some(title) = link.title %}{{ title }}{% endif %}</td>
             <td class="py-3 px-4">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center justify-between w-full">
                   <a href="https://{{ domain }}{{ link.link_id }}" 
                        target="_blank"
-                       class="text-blue-600 hover:text-blue-800">
+                       class="text-blue-600 hover:text-blue-800 truncate">
                        {{ domain }}{{ link.link_id }}
                     </a>
-                    <button class="copy-icon group inline-flex items-center justify-center w-6 h-6 text-gray-400 hover:text-gray-600 focus:outline-none" 
+                    <button class="copy-icon ml-2 flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 focus:outline-none" 
                             data-url="https://{{ domain }}{{ link.link_id }}"
-                            title="Copy to Clipboard">
+                            title="Copy to Clipboard"
+                            onclick="copyToClipboard('https://{{ domain }}{{link.link_id}}')">
                         <i class="fas fa-copy text-sm"></i>
                     </button>
                 </div>
