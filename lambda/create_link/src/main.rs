@@ -2,8 +2,9 @@ use lambda_http::http::StatusCode;
 use lambda_http::{run, service_fn, tracing, Error, IntoResponse, Request, RequestPayloadExt};
 
 use shared::core::{ShortenUrlRequest, UrlShortener};
-use shared::response::{empty_response, json_response};
+use shared::response::{empty_response, json_response, html_response};
 use shared::url_info::UrlInfo;
+use shared::templates::{NewShortLink, Template};
 
 use std::env;
 
@@ -30,8 +31,21 @@ async fn function_handler(
                         .shorten_url(ser, url_info)
                         .await;
 
+                    // See if the request is coming from the front end HTMX
+                    let htmx_request = event.headers().get("Hx-Request");
+
                     // See if we managed to shorten it
                     match shortened_url_response {
+                        Ok(response) if htmx_request.is_some() => {
+                            tracing::info!("Request is HTMX");
+                            let new_link_html = NewShortLink {
+                                link: response.link_id,
+                                // TODO: Make this not hardcoded
+                                domain: "krtk.rs/"
+                            };
+                            let body = new_link_html.render()?; // Render HTML
+                            html_response(&StatusCode::OK, body) // Respond with HTML
+                        },
                         // Yes, return the JSON back
                         Ok(response) => json_response(&StatusCode::OK, &response),
                         // No, fail spectacularly

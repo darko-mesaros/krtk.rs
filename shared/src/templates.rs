@@ -15,3 +15,10 @@ pub struct LinksTable {
     pub links: Vec<Link>,
     pub domain: &'static str,
 }
+
+#[derive(Template, Debug)]
+#[template(path = "new_short_link.html")]
+pub struct NewShortLink {
+    pub link: String,
+    pub domain: &'static str,
+}

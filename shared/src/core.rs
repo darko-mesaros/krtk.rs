@@ -36,7 +36,7 @@ pub struct ListShortUrlResponse {
 // A struct that will contain info about our Short links
 #[derive(Debug, Serialize)]
 pub struct ShortUrl {
-    link_id: String,
+    pub link_id: String,
     original_link: String,
     clicks: u32,
     title: Option<String>,

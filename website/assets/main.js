@@ -8,24 +8,6 @@ function getBaseDomain() {
 }
 
 htmx.on('htmx:afterRequest', function(evt) {
-    if (evt.detail.elt.tagName === 'FORM' && evt.detail.successful) {
-        try {
-            const response = JSON.parse(evt.detail.xhr.response);
-            const resultDiv = document.getElementById('result');
-            const baseDomain = getBaseDomain();
-            resultDiv.innerHTML = `
-                <div class="text-green-600">
-                    Shortened URL: 
-                    <a href="//${baseDomain}/${response.link_id}" 
-                       target="_blank"
-                       class="text-blue-600 hover:text-blue-800">
-                        ${baseDomain}/${response.link_id}
-                    </a>
-                </div>`;
-        } catch (e) {
-            console.error('Error parsing response:', e);
-        }
-    }
     document.getElementById('submit-btn').disabled = false;
 });
 

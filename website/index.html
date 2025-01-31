@@ -8,6 +8,17 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      .htmx-indicator{
+        display: none;
+      }
+      .htmx-request .htmx-indicator{
+        display: inline;
+      }
+      .htmx-request.htmx-indicator{
+        display: inline;
+      }
+    </style>
 </head>
 <body class="bg-gray-50 min-h-full flex flex-col">
     <main class="flex-grow">
@@ -21,9 +32,9 @@
                 <form id="shorten-form"
                       hx-post="/api/links"
                       hx-trigger="submit"
-                      hx-swap="none"
+                      hx-swap="innerHtml"
                       hx-target="#result"
-                      hx-indicator=".loader"
+                      hx-indicator="#loader"
                       hx-on::after-request="if(event.detail.successful) {
                         this.reset();
                         htmx.trigger('#link-list', 'refreshLinks')
@@ -44,7 +55,7 @@
                 </form>
 
                 <!-- Shortened URL -->
-                <div class="loader hidden items-center gap-3 my-4">
+                <div id="loader" class="htmx-indicator items-center gap-3 my-4">
                     <div class="w-5 h-5 border-3 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
                     <span class="text-gray-600">Shortening URL ...</span>
                 </div>
