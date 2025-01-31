@@ -40,3 +40,14 @@ pub fn json_response(status: &StatusCode, body: &impl Serialize) -> Result<Respo
 
     Ok(response)
 }
+// Respond with HTML
+// Takes in some body that implements the Serialize trait
+pub fn html_response(status: &StatusCode, body: String) -> Result<Response<Body>, Error> {
+    let response = Response::builder()
+        .status(status)
+        .header("content-type", "text/html")
+        .body(Body::Text(body))
+        .map_err(Box::new)?;
+
+    Ok(response)
+}

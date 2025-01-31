@@ -45,10 +45,6 @@ export class KrtkRsStack extends cdk.Stack {
       websiteIndexDocument: 'index.html'
     });
 
-    new BucketDeployment(this, 'deployWebsite',{
-      sources: [Source.asset('./website')],
-      destinationBucket: hostingBucket
-    });
 
     // DynamoDB
     const linkDatabase = new TableV2(this, 'linkTable', {
@@ -186,6 +182,13 @@ export class KrtkRsStack extends cdk.Stack {
           responsePagePath: '/'
         }
       ]
+    });
+
+    new BucketDeployment(this, 'deployWebsite',{
+      sources: [Source.asset('./website')],
+      destinationBucket: hostingBucket,
+      distribution: cdn,
+      distributionPaths: ['/*']
     });
 
     new ARecord(this, 'apiAliasRecord',{

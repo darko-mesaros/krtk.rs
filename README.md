@@ -156,6 +156,9 @@ Here is the stuff that need to be implemented to make this project production-re
 - [ ] **Implement Auth**: Use [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools.html) to add authentication.
 - [ ] **Shorter links**: Investigate ways to generate shorter URLs (e.g., shorter UUIDs or custom short codes).
 
+### Front End ✨
+- [ ] **Order links by creation**: Figure out how to order retrieved links by date created.
+
 ### Documentation & Testing 📚
 - [ ] **Add tests for CDK stack**: Currently, the tests for the CDK stack are not implemented.
 - [ ] **Improve documentation**: Add more detailed documentation for deployment, usage, and troubleshooting.

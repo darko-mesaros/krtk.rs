@@ -2,7 +2,8 @@ use lambda_http::http::StatusCode;
 use lambda_http::{run, service_fn, tracing, Error, IntoResponse, Request, RequestExt};
 
 use shared::core::UrlShortener;
-use shared::response::{empty_response, json_response};
+use shared::response::{empty_response, json_response, html_response};
+use shared::templates::{LinksTable, Link, Template};
 
 use std::env;
 
@@ -22,8 +23,24 @@ async fn function_handler(
     // Get all the links
     let links = url_shortener.list_urls(last_evaluated_id).await;
 
+    // See if the request is coming from the front end HTMX
+    let htmx_request = event.headers().get("Hx-Request");
+
     // Handle the links
     match links {
+        Ok(links) if htmx_request.is_some() => {
+                tracing::info!("Request is HTMX");
+                // TODO: Make this more compact and handle the Results
+                let links_str = serde_json::to_value(&links)?;
+                let table_links: Vec<Link> = serde_json::from_value(links_str["short_urls"].clone())?;
+                let table_html = LinksTable {
+                    links: table_links,
+                    // TODO: Make this not hardcoded
+                    domain: "krtk.rs/"
+                };
+                let body = table_html.render()?; // Render HTML
+                html_response(&StatusCode::OK, body) // Respond with HTML
+        },
         Ok(links) => json_response(&StatusCode::OK, &links),
         Err(e) => {
             tracing::error!("Failed to list URLs 🔥 : {:?}", e);
