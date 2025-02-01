@@ -246,7 +246,7 @@ impl UrlShortener {
             .dynamodb_client
             .scan()
             .table_name(&self.dynamodb_urls_table)
-            .limit(50);
+            .limit(10); // NOTE: 50 was the original
 
         // If we have a last_evaluated_id as Some() modify the scan to include the
         // exclusive_start_key() with a value of the last_evaluated_id
