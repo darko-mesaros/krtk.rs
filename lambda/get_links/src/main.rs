@@ -36,7 +36,8 @@ async fn function_handler(
                 let table_html = LinksTable {
                     links: table_links,
                     // TODO: Make this not hardcoded
-                    domain: "krtk.rs/"
+                    domain: "krtk.rs/",
+                    has_more: links.has_more,
                 };
                 let body = table_html.render()?; // Render HTML
                 html_response(&StatusCode::OK, body) // Respond with HTML
