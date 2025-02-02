@@ -1,32 +1,37 @@
-<table class="w-full">
-    <thead>
-        <tr class="border-b">
-            <th class="py-3 px-4 text-left bg-gray-50">Title</th>
-            <th class="py-3 px-4 text-left bg-gray-50 w-48">Short Link</th>
-            <th class="py-3 px-4 text-left bg-gray-50">Clicks</th>
-        </tr>
-    </thead>
-    <tbody id="linksTable" class="divide-y">
-        {% for link in links %}
-        <tr>
-          <td class="py-1 px-2">{% if let Some(title) = link.title %}{{ title }}{% endif %}</td>
-            <td class="py-1 px-2">
-                <div class="flex items-center justify-between w-full">
-                  <a href="https://{{ domain }}{{ link.link_id }}" 
-                       target="_blank"
-                       class="text-blue-600 hover:text-blue-800 truncate">
-                       {{ domain }}{{ link.link_id }}
-                    </a>
-                    <button class="copy-icon ml-2 flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 focus:outline-none" 
-                            data-url="https://{{ domain }}{{ link.link_id }}"
-                            title="Copy to Clipboard"
-                            onclick="copyToClipboard('https://{{ domain }}{{link.link_id}}')">
-                        <i class="fas fa-copy text-sm"></i>
-                    </button>
-                </div>
-            </td>
-            <td class="py-3 px-4">{{ link.clicks }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+{% for link in links %}
+{% if loop.last && has_more == true %}
+<tr hx-get="/api/links?last_evaluated_id={{link.link_id}}"
+  hx-trigger="revealed"
+  hx-target="#linksTable"
+  hx-swap="beforeend"
+  hx-indicator="#table-rows-loader"
+  class="hover:bg-blue-100">
+{% else %}
+<tr class="hover:bg-blue-100">
+{% endif %}
+  <td class="py-1 px-2">{% if let Some(title) = link.title %}{{ title }}{% endif %}</td>
+    <td class="py-1 px-2">
+        <div class="flex items-center justify-between w-full">
+          <a href="https://{{ domain }}{{ link.link_id }}" 
+               target="_blank"
+               class="text-blue-600 hover:text-blue-800 truncate">
+               {{ domain }}{{ link.link_id }}
+            </a>
+            <button class="copy-icon ml-2 flex-shrink-0 p-2 text-gray-400 hover:text-gray-600 focus:outline-none" 
+                    data-url="https://{{ domain }}{{ link.link_id }}"
+                    title="Copy to Clipboard"
+                    onclick="copyToClipboard('https://{{ domain }}{{link.link_id}}')">
+                <i class="fas fa-copy text-sm"></i>
+            </button>
+        </div>
+    </td>
+    <td class="py-3 px-4">{{ link.clicks }}</td>
+</tr>
+{% endfor %}
+{% if has_more == false %}
+<tr>
+  <td colspan="3" class="text-center py-4 text-gray-500 italic">
+    All items loaded
+  </td>
+</tr>
+{% endif %}

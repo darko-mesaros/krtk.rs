@@ -14,6 +14,7 @@ pub struct Link {
 pub struct LinksTable {
     pub links: Vec<Link>,
     pub domain: &'static str,
+    pub has_more: bool,
 }
 
 #[derive(Template, Debug)]

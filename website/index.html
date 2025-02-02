@@ -18,6 +18,18 @@
       .htmx-request.htmx-indicator{
         display: inline;
       }
+      .spinner {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg);}
+        100% { transform: rotate(360deg);}
+      }
     </style>
 </head>
 <body class="bg-gray-50 min-h-full flex flex-col">
@@ -34,7 +46,7 @@
                       hx-trigger="submit"
                       hx-swap="innerHtml"
                       hx-target="#result"
-                      hx-indicator="#loader"
+                      hx-indicator="#table-loader"
                       hx-on::after-request="if(event.detail.successful) {
                         this.reset();
                         htmx.trigger('#link-list', 'refreshLinks')
@@ -54,17 +66,42 @@
                     </div>
                 </form>
 
-                <!-- Shortened URL -->
-                <div id="loader" class="htmx-indicator items-center gap-3 my-4">
-                    <div class="w-5 h-5 border-3 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
+                <!-- Shortened URL Loader -->
+                <div id="table-loader" class="htmx-indicator items-center gap-3 my-4">
                     <span class="text-gray-600">Shortening URL ...</span>
                 </div>
                 <div id="result" class="mb-6"></div>
 
                 <!-- All shortened URLs -->
                 <h3 class="text-xl font-semibold mb-4">Shortened links</h3>
-                <div id="link-list" hx-get="/api/links" hx-trigger="load, refreshLinks">
-                  Loading links...
+                <div id="link-list" hx-get="/api/links" hx-trigger="load, refreshLinks" hx-target="#linksTable" hx-indicator="#table-rows-loader">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b">
+                                <th class="py-3 px-4 text-left bg-gray-50">Title</th>
+                                <th class="py-3 px-4 text-left bg-gray-50 w-48">Short Link</th>
+                                <th class="py-3 px-4 text-left bg-gray-50">Clicks</th>
+                            </tr>
+                        </thead>
+                        <tbody id="linksTable" class="divide-y">
+                        </tbody>
+                    </table>
+
+                    <!-- Table Loader -->
+                    <!-- <div id="table-rows-loader" class="htmx-indicator relative inset-0 flex items-center justify-center"> -->
+                    <!--     <div class="flex items-center gap-3 p-2 bg-yellow-100 rounded-lg shadow justify-center"> -->
+                    <!--         <div class="spinner"></div> -->
+                    <!--         <span class="text-gray-600 font-medium">Loading links...</span> -->
+                    <!--     </div> -->
+                    <!-- </div> -->
+
+                    <div id="table-rows-loader" class="htmx-indicator flex p-4">
+                      <div class="flex items-center space-x-3 bg-yellow-100 px-4 py-2 rounded-lg shadow-sm justify-center">
+                          <div class="spinner"></div>
+                          <span class="text-gray-600 font-medium">Loading links...</span>
+                      </div>
+                    </div>
+
                 </div>
             </div>
         </div>
