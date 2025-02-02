@@ -169,4 +169,4 @@ Here is the stuff that need to be implemented to make this project production-re
 - [ ] **Custom domains**: Allow users to use custom domains for their shortened links.
 
 ### HTMX 🌐
-- [ ] **Optimize for HTMX**: Instead of returning JSON, I should have the ability to return pure HTML and have it just handled by HTMX
+- [x] **Optimize for HTMX**: Instead of returning JSON, I should have the ability to return pure HTML and have it just handled by HTMX
