@@ -158,6 +158,7 @@ Here is the stuff that need to be implemented to make this project production-re
 
 ### Front End ✨
 - [ ] **Order links by creation**: Figure out how to order retrieved links by date created.
+- [x] **Pagination**: Implement pagination for the front end.
 
 ### Documentation & Testing 📚
 - [ ] **Add tests for CDK stack**: Currently, the tests for the CDK stack are not implemented.
