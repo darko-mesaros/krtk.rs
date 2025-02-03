@@ -48,7 +48,7 @@ impl UrlInfo {
         //     // do something
         //   }
         // }
-        if matches!(content_type, Some(ref ct) if ct.starts_with("text/html")) {
+        if matches!(&content_type, Some(ct) if ct.starts_with("text/html")) {
             // Test if we get some response from .text()
             if let Ok(html_body) = response.text().await {
                 // Parse the document
