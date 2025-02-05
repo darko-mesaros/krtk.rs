@@ -4,6 +4,7 @@ use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
 use cuid2::CuidConstructor;
 use serde::{Deserialize, Serialize};
+use chrono::{Utc, DateTime};
 
 use crate::url_info::UrlInfo;
 
@@ -169,6 +170,11 @@ impl UrlShortener {
         if let Some(ref image) = url_details.image {
             put_item = put_item.item("Image", AttributeValue::S(image.to_string()));
         }
+
+        // Add the current timestamp
+        // NOTE:for future Darko - you deal with the local time vs UTC
+        let current_time: DateTime<Utc> = Utc::now();
+        put_item = put_item.item("TimeStamp", AttributeValue::S(current_time.to_string()));
 
         // Once we are ready, let's send the call
         put_item
