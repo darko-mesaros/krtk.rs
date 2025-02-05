@@ -8,6 +8,8 @@ use chrono::Utc;
 
 use crate::url_info::UrlInfo;
 
+const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
+
 #[derive(Deserialize)]
 pub struct ShortenUrlRequest {
     url_to_shorten: String,
@@ -157,7 +159,7 @@ impl UrlShortener {
             .dynamodb_client
             .put_item() // Put single item
             .table_name(&self.dynamodb_urls_table) // Table name is from the Struct
-            .item("SortKey".to_string(), AttributeValue::S("LINKS".to_string())) // Adding the sort
+            .item("SortKey".to_string(), AttributeValue::S(SORT_KEY_VALUE.to_string())) // Adding the sort
                                                                                  // key
             .item("LinkId", AttributeValue::S(short_url.clone())) // Putting item "LinkId" as
             // String
@@ -292,7 +294,7 @@ impl UrlShortener {
             .expression_attribute_names("#pk", "SortKey")
             .expression_attribute_values(
                 ":pk",
-                AttributeValue::S("LINKS".to_string())
+                AttributeValue::S(SORT_KEY_VALUE.to_string())
             )
             .table_name(&self.dynamodb_urls_table)
             .scan_index_forward(false)
@@ -302,7 +304,7 @@ impl UrlShortener {
         // exclusive_start_key() with a value of the last_evaluated_id
         if let (Some(lei), Some(letime)) = (last_evaluated_id, last_evaluated_timestamp) {
             let mut exclusive_start_key = HashMap::new();
-            exclusive_start_key.insert("SortKey".to_string(), AttributeValue::S("LINKS".to_string()));
+            exclusive_start_key.insert("SortKey".to_string(), AttributeValue::S(SORT_KEY_VALUE.to_string()));
             exclusive_start_key.insert("LinkId".to_string(), AttributeValue::S(lei.to_string()));
             exclusive_start_key.insert("TimeStamp".to_string(), AttributeValue::N(letime.to_string()));
             query = query.set_exclusive_start_key(Some(exclusive_start_key));
