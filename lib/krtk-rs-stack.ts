@@ -5,7 +5,7 @@ import { HttpApi, HttpMethod, CorsHttpMethod, HttpStage, ThrottleSettings } from
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { HostedZone, ARecord, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { Certificate} from 'aws-cdk-lib/aws-certificatemanager';
-import { TableV2, AttributeType } from 'aws-cdk-lib/aws-dynamodb';
+import { TableV2, AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { Bucket, BlockPublicAccess } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
@@ -52,8 +52,20 @@ export class KrtkRsStack extends cdk.Stack {
         name: 'LinkId',
         type: AttributeType.STRING
       },
+      sortKey: {
+        name: 'TimeStamp',
+        type: AttributeType.NUMBER,
+      },
       removalPolicy: cdk.RemovalPolicy.DESTROY, // TODO: REMOVE FOR PROD
     });
+    linkDatabase.addGlobalSecondaryIndex({
+      indexName: 'TimeStampIndex',
+      partitionKey: {
+        name: 'TimeStamp',
+        type: AttributeType.NUMBER,
+      },
+      projectionType: ProjectionType.ALL
+    })
 
     // 3x Lambda
     const createLinkLambda = new RustFunction(this, 'createLink', {
