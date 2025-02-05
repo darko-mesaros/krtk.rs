@@ -267,24 +267,6 @@ impl UrlShortener {
         last_evaluated_id: Option<&str>,
         last_evaluated_timestamp: Option<&str>,
     ) -> Result<ListShortUrlResponse, String> {
-        // // Run a scan on 25 items, but make it mutable as we may do something in a bit.
-        // let mut scan = self
-        //     .dynamodb_client
-        //     .scan()
-        //     .table_name(&self.dynamodb_urls_table)
-        //     .limit(25);
-        //
-        // // If we have a last_evaluated_id as Some() modify the scan to include the
-        // // exclusive_start_key() with a value of the last_evaluated_id
-        // if let Some(lei) = last_evaluated_id {
-        //     scan = scan.exclusive_start_key("LinkId", AttributeValue::S(lei.to_string()));
-        // }
-        //
-        // // Run the scan
-        // let result = scan
-        //     .send()
-        //     .await
-        //     .map_err(|e| format!("Error executing scan: {:?}", e))?;
         // Run a scan on 25 items, but make it mutable as we may do something in a bit.
         let mut query = self
             .dynamodb_client

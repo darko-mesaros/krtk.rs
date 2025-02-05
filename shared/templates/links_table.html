@@ -9,7 +9,7 @@
 {% else %}
 <tr class="hover:bg-blue-100">
 {% endif %}
-<td class="py-1 px-2">{{ link.timestamp }}</td>
+<td class="py-1 px-2 italic fg text-gray-500">{{ link.timestamp|format_timestamp }}</td>
   <td class="py-1 px-2">{% if let Some(title) = link.title %}{{ title|truncate(128) }}{% endif %}</td>
     <td class="py-1 px-2">
         <div class="flex items-center justify-between w-full">
@@ -31,7 +31,7 @@
 {% endfor %}
 {% if has_more == false %}
 <tr>
-  <td colspan="3" class="text-center py-4 text-gray-500 italic">
+  <td colspan="4" class="text-center py-4 text-gray-500 italic">
     All items loaded
   </td>
 </tr>

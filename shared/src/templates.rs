@@ -1,5 +1,7 @@
-pub use askama::Template;
+pub use askama::{Template, Error};
 use serde::Deserialize; 
+use std::fmt::Display;
+use chrono::{Utc, TimeZone};
 
 #[derive(Deserialize, Debug)]
 pub struct Link {
@@ -17,6 +19,24 @@ pub struct LinksTable {
     pub domain: &'static str,
     pub has_more: bool,
 }
+
+// Filters are great: https://rinja-rs.github.io/askama/filters.html
+mod filters {
+    use super::*;
+    pub fn format_timestamp(ts: impl Display) -> ::askama::Result<String> {
+        // Convert the Display value to i64
+        let ts_str = ts.to_string();
+        let ts_i64 = ts_str.parse::<i64>()
+            .map_err(|_| Error::Custom("Invalid timestamp format".into()))?;
+
+        Utc.timestamp_opt(ts_i64, 0)
+            .single()
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+            .ok_or(Error::Custom("Invalid timestamp".into()))
+    }
+}
+
+// ---
 
 #[derive(Template, Debug)]
 #[template(path = "new_short_link.html")]
