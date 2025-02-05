@@ -7,6 +7,7 @@ pub struct Link {
     #[serde(rename = "link_id")]
     link_id: String,
     clicks: u32,
+    timestamp: i64,
 }
 
 #[derive(Template, Debug)]

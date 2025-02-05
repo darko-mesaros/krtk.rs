@@ -4,7 +4,7 @@ use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
 use cuid2::CuidConstructor;
 use serde::{Deserialize, Serialize};
-use chrono::{Utc, DateTime};
+use chrono::Utc;
 
 use crate::url_info::UrlInfo;
 
@@ -46,6 +46,7 @@ pub struct ShortUrl {
     description: Option<String>,
     content_type: Option<String>,
     image: Option<String>,
+    timestamp: i64,
 }
 
 // We are implementing a TryFrom for ShortUrl
@@ -94,7 +95,16 @@ impl TryFrom<HashMap<String, AttributeValue>> for ShortUrl {
         let image = item
             .get("Image")
             .and_then(|c| c.as_s().map(|s| s.to_string()).ok());
-
+        let timestamp = item
+            .get("TimeStamp")
+            .ok_or_else(|| "TimeStamp not found".to_string())?
+            .as_n() // Returns the Number (DynamoDB attr) as String
+            .map_err(|_| "TimeStamp is not a Number".to_string())
+            .and_then(|n| {
+                // We then try to conver it into an actual u32
+                n.parse::<i64>()
+                    .map_err(|_| "Cannot convert TimeStamp into i64".to_string())
+            })?;
         Ok(Self {
             link_id,
             original_link,
@@ -103,6 +113,7 @@ impl TryFrom<HashMap<String, AttributeValue>> for ShortUrl {
             description,
             content_type,
             image,
+            timestamp
         })
     }
 }
@@ -173,8 +184,8 @@ impl UrlShortener {
 
         // Add the current timestamp
         // NOTE:for future Darko - you deal with the local time vs UTC
-        let current_time: DateTime<Utc> = Utc::now();
-        put_item = put_item.item("TimeStamp", AttributeValue::S(current_time.to_string()));
+        let current_time = Utc::now().timestamp();
+        put_item = put_item.item("TimeStamp", AttributeValue::N(current_time.to_string()));
 
         // Once we are ready, let's send the call
         put_item
@@ -192,6 +203,7 @@ impl UrlShortener {
                 description: url_details.description,
                 content_type: url_details.content_type,
                 image: url_details.image,
+                timestamp: current_time, //TODO: Clean this up
             })
             .map_err(|e| format!("Error adding item: {:?}", e)) // OR if there is an error, mapping
                                                                 // it to this formatted string.
