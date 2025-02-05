@@ -52,15 +52,15 @@ export class KrtkRsStack extends cdk.Stack {
         name: 'LinkId',
         type: AttributeType.STRING
       },
-      sortKey: {
-        name: 'TimeStamp',
-        type: AttributeType.NUMBER,
-      },
       removalPolicy: cdk.RemovalPolicy.DESTROY, // TODO: REMOVE FOR PROD
     });
     linkDatabase.addGlobalSecondaryIndex({
       indexName: 'TimeStampIndex',
       partitionKey: {
+        name: 'SortKey',
+        type: AttributeType.STRING,
+      },
+      sortKey: {
         name: 'TimeStamp',
         type: AttributeType.NUMBER,
       },

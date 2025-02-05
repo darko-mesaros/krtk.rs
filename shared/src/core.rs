@@ -32,6 +32,7 @@ pub struct ShortenUrlResponse {
 pub struct ListShortUrlResponse {
     short_urls: Vec<ShortUrl>,
     last_evaluated_id: Option<String>,
+    last_evaluated_timestamp: Option<String>,
     // TODO: Does this one need to be public? 
     pub has_more: bool,
 }
@@ -156,6 +157,8 @@ impl UrlShortener {
             .dynamodb_client
             .put_item() // Put single item
             .table_name(&self.dynamodb_urls_table) // Table name is from the Struct
+            .item("SortKey".to_string(), AttributeValue::S("LINKS".to_string())) // Adding the sort
+                                                                                 // key
             .item("LinkId", AttributeValue::S(short_url.clone())) // Putting item "LinkId" as
             // String
             .item(
@@ -260,22 +263,53 @@ impl UrlShortener {
     pub async fn list_urls(
         &self,
         last_evaluated_id: Option<&str>,
+        last_evaluated_timestamp: Option<&str>,
     ) -> Result<ListShortUrlResponse, String> {
+        // // Run a scan on 25 items, but make it mutable as we may do something in a bit.
+        // let mut scan = self
+        //     .dynamodb_client
+        //     .scan()
+        //     .table_name(&self.dynamodb_urls_table)
+        //     .limit(25);
+        //
+        // // If we have a last_evaluated_id as Some() modify the scan to include the
+        // // exclusive_start_key() with a value of the last_evaluated_id
+        // if let Some(lei) = last_evaluated_id {
+        //     scan = scan.exclusive_start_key("LinkId", AttributeValue::S(lei.to_string()));
+        // }
+        //
+        // // Run the scan
+        // let result = scan
+        //     .send()
+        //     .await
+        //     .map_err(|e| format!("Error executing scan: {:?}", e))?;
         // Run a scan on 25 items, but make it mutable as we may do something in a bit.
-        let mut scan = self
+        let mut query = self
             .dynamodb_client
-            .scan()
+            .query()
+            .index_name("TimeStampIndex")
+            .key_condition_expression("#pk = :pk")
+            .expression_attribute_names("#pk", "SortKey")
+            .expression_attribute_values(
+                ":pk",
+                AttributeValue::S("LINKS".to_string())
+            )
             .table_name(&self.dynamodb_urls_table)
-            .limit(25);
+            .scan_index_forward(false)
+            .limit(5);
 
         // If we have a last_evaluated_id as Some() modify the scan to include the
         // exclusive_start_key() with a value of the last_evaluated_id
-        if let Some(lei) = last_evaluated_id {
-            scan = scan.exclusive_start_key("LinkId", AttributeValue::S(lei.to_string()));
+        if let (Some(lei), Some(letime)) = (last_evaluated_id, last_evaluated_timestamp) {
+            let mut exclusive_start_key = HashMap::new();
+            exclusive_start_key.insert("SortKey".to_string(), AttributeValue::S("LINKS".to_string()));
+            exclusive_start_key.insert("LinkId".to_string(), AttributeValue::S(lei.to_string()));
+            exclusive_start_key.insert("TimeStamp".to_string(), AttributeValue::N(letime.to_string()));
+            query = query.set_exclusive_start_key(Some(exclusive_start_key));
         }
 
         // Run the scan
-        let result = scan
+        let result = query
             .send()
             .await
             .map_err(|e| format!("Error executing scan: {:?}", e))?;
@@ -297,18 +331,27 @@ impl UrlShortener {
 
         // Set the last_evaluated_id from the result
         // If the key is Empty that means the last page of results has been processed.
-        let last_evaluated_id = result
-            .last_evaluated_key
-            .unwrap_or_default() // Get somethign or just be None
-            .get("LinkId")
-            .map(|s| s.as_s().unwrap().to_string()); // TODO: Handle unwrap()
-                                                     //
-        let has_more = last_evaluated_id.is_some();                        
+                // Extract pagination tokens
+        let (last_evaluated_id, last_evaluated_timestamp) = 
+            if let Some(last_key) = result.last_evaluated_key {
+                (
+                    last_key.get("LinkId")
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string()),
+                    last_key.get("TimeStamp")
+                        .and_then(|v| v.as_n().ok())
+                        .map(|s| s.to_string())
+                )
+            } else {
+                (None, None)
+            };
+        let has_more = last_evaluated_id.is_some() && last_evaluated_timestamp.is_some();
 
         // Return the ListShortUrlResponse Struct with all the urls
         Ok(ListShortUrlResponse {
             short_urls,
             last_evaluated_id,
+            last_evaluated_timestamp,
             has_more,
         })
     }

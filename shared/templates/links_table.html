@@ -1,6 +1,6 @@
 {% for link in links %}
 {% if loop.last && has_more == true %}
-<tr hx-get="/api/links?last_evaluated_id={{link.link_id}}"
+<tr hx-get="/api/links?last_evaluated_id={{link.link_id}}&last_evaluated_timestamp={{link.timestamp}}"
   hx-trigger="revealed"
   hx-target="#linksTable"
   hx-swap="beforeend"

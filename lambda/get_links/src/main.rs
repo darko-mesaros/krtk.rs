@@ -19,9 +19,10 @@ async fn function_handler(
     let query_params = event.query_string_parameters();
     // Search for last_evaluated_id and store it into the var
     let last_evaluated_id = query_params.first("last_evaluated_id");
+    let last_evaluated_timestamp = query_params.first("last_evaluated_timestamp");
 
     // Get all the links
-    let links = url_shortener.list_urls(last_evaluated_id).await;
+    let links = url_shortener.list_urls(last_evaluated_id, last_evaluated_timestamp).await;
 
     // See if the request is coming from the front end HTMX
     let htmx_request = event.headers().get("Hx-Request");
