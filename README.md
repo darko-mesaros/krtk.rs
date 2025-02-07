@@ -157,7 +157,7 @@ Here is the stuff that need to be implemented to make this project production-re
 - [ ] **Shorter links**: Investigate ways to generate shorter URLs (e.g., shorter UUIDs or custom short codes).
 
 ### Front End ✨
-- [ ] **Order links by creation**: Figure out how to order retrieved links by date created.
+- [x] **Order links by creation**: Figure out how to order retrieved links by date created.
 - [x] **Pagination**: Implement pagination for the front end.
 
 ### Documentation & Testing 📚
