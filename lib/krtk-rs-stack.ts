@@ -9,8 +9,11 @@ import { TableV2, AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { Bucket, BlockPublicAccess } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
-import { AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
+import { Endpoint, RealtimeLogConfig, AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3StaticWebsiteOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { Stream } from 'aws-cdk-lib/aws-kinesis';
+import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { StartingPosition } from 'aws-cdk-lib/aws-lambda';
 
 interface KrtkRsStackProps extends cdk.StackProps {
   certificateArn: string;
@@ -45,6 +48,23 @@ export class KrtkRsStack extends cdk.Stack {
       websiteIndexDocument: 'index.html'
     });
 
+    // Kinesis stream for analytics
+    const cfAnalyticsStream = new Stream(this, 'cfAnalyticsStream');
+
+    // Real time Analytics streaming configuration
+    const realTimeConfig = new RealtimeLogConfig(this, 'realTimeConfig',{
+      endPoints: [
+        Endpoint.fromKinesisStream(cfAnalyticsStream),
+      ],
+      fields: [
+        'timestamp',
+        'c-ip',
+        'cs-uri-stem',
+        'sc-status',
+      ],
+      realtimeLogConfigName: 'krtkAnalytics',
+      samplingRate: 100,
+    });
 
     // DynamoDB
     const linkDatabase = new TableV2(this, 'linkTable', {
@@ -96,6 +116,22 @@ export class KrtkRsStack extends cdk.Stack {
     linkDatabase.grantReadData(getLinksLambda);
     linkDatabase.grantReadWriteData(visitLinkLambda);
     linkDatabase.grantWriteData(createLinkLambda);
+
+    const processAnalyticsLambda = new RustFunction(this, 'processAnalyticsLambda', {
+      manifestPath: 'lambda/process_analytics/Cargo.toml',
+      runtime: 'provided.al2023',
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        TABLE_NAME: linkDatabase.tableName,
+      }
+    });
+    // Give Function permission to Kinesis
+    cfAnalyticsStream.grantRead(processAnalyticsLambda);
+    // ESM for Kinesis
+    processAnalyticsLambda.addEventSource(new KinesisEventSource(cfAnalyticsStream,{
+      batchSize: 1,
+      startingPosition: StartingPosition.TRIM_HORIZON,
+    }));
 
     // HTTP Api
     const api = new HttpApi(this, 'httpApi',{
@@ -184,6 +220,7 @@ export class KrtkRsStack extends cdk.Stack {
           allowedMethods: AllowedMethods.ALLOW_ALL,
           cachePolicy: CachePolicy.CACHING_DISABLED,
           originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          realtimeLogConfig: realTimeConfig,
         },
       },
       certificate: cert,
