@@ -4,8 +4,11 @@ use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
 use cuid2::CuidConstructor;
 use serde::{Deserialize, Serialize};
+use chrono::Utc;
 
 use crate::url_info::UrlInfo;
+
+const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
 
 #[derive(Deserialize)]
 pub struct ShortenUrlRequest {
@@ -31,6 +34,7 @@ pub struct ShortenUrlResponse {
 pub struct ListShortUrlResponse {
     short_urls: Vec<ShortUrl>,
     last_evaluated_id: Option<String>,
+    last_evaluated_timestamp: Option<String>,
     // TODO: Does this one need to be public? 
     pub has_more: bool,
 }
@@ -45,6 +49,7 @@ pub struct ShortUrl {
     description: Option<String>,
     content_type: Option<String>,
     image: Option<String>,
+    timestamp: i64,
 }
 
 // We are implementing a TryFrom for ShortUrl
@@ -93,7 +98,16 @@ impl TryFrom<HashMap<String, AttributeValue>> for ShortUrl {
         let image = item
             .get("Image")
             .and_then(|c| c.as_s().map(|s| s.to_string()).ok());
-
+        let timestamp = item
+            .get("TimeStamp")
+            .ok_or_else(|| "TimeStamp not found".to_string())?
+            .as_n() // Returns the Number (DynamoDB attr) as String
+            .map_err(|_| "TimeStamp is not a Number".to_string())
+            .and_then(|n| {
+                // We then try to conver it into an actual u32
+                n.parse::<i64>()
+                    .map_err(|_| "Cannot convert TimeStamp into i64".to_string())
+            })?;
         Ok(Self {
             link_id,
             original_link,
@@ -102,6 +116,7 @@ impl TryFrom<HashMap<String, AttributeValue>> for ShortUrl {
             description,
             content_type,
             image,
+            timestamp
         })
     }
 }
@@ -144,6 +159,8 @@ impl UrlShortener {
             .dynamodb_client
             .put_item() // Put single item
             .table_name(&self.dynamodb_urls_table) // Table name is from the Struct
+            .item("SortKey".to_string(), AttributeValue::S(SORT_KEY_VALUE.to_string())) // Adding the sort
+                                                                                 // key
             .item("LinkId", AttributeValue::S(short_url.clone())) // Putting item "LinkId" as
             // String
             .item(
@@ -170,6 +187,11 @@ impl UrlShortener {
             put_item = put_item.item("Image", AttributeValue::S(image.to_string()));
         }
 
+        // Add the current timestamp
+        // NOTE:for future Darko - you deal with the local time vs UTC
+        let current_time = Utc::now().timestamp();
+        put_item = put_item.item("TimeStamp", AttributeValue::N(current_time.to_string()));
+
         // Once we are ready, let's send the call
         put_item
             .condition_expression("attribute_not_exists(LinkId)") // We are making a condition to
@@ -186,6 +208,7 @@ impl UrlShortener {
                 description: url_details.description,
                 content_type: url_details.content_type,
                 image: url_details.image,
+                timestamp: current_time, //TODO: Clean this up
             })
             .map_err(|e| format!("Error adding item: {:?}", e)) // OR if there is an error, mapping
                                                                 // it to this formatted string.
@@ -242,22 +265,35 @@ impl UrlShortener {
     pub async fn list_urls(
         &self,
         last_evaluated_id: Option<&str>,
+        last_evaluated_timestamp: Option<&str>,
     ) -> Result<ListShortUrlResponse, String> {
         // Run a scan on 25 items, but make it mutable as we may do something in a bit.
-        let mut scan = self
+        let mut query = self
             .dynamodb_client
-            .scan()
+            .query()
+            .index_name("TimeStampIndex")
+            .key_condition_expression("#pk = :pk")
+            .expression_attribute_names("#pk", "SortKey")
+            .expression_attribute_values(
+                ":pk",
+                AttributeValue::S(SORT_KEY_VALUE.to_string())
+            )
             .table_name(&self.dynamodb_urls_table)
-            .limit(25);
+            .scan_index_forward(false)
+            .limit(5);
 
         // If we have a last_evaluated_id as Some() modify the scan to include the
         // exclusive_start_key() with a value of the last_evaluated_id
-        if let Some(lei) = last_evaluated_id {
-            scan = scan.exclusive_start_key("LinkId", AttributeValue::S(lei.to_string()));
+        if let (Some(lei), Some(letime)) = (last_evaluated_id, last_evaluated_timestamp) {
+            let mut exclusive_start_key = HashMap::new();
+            exclusive_start_key.insert("SortKey".to_string(), AttributeValue::S(SORT_KEY_VALUE.to_string()));
+            exclusive_start_key.insert("LinkId".to_string(), AttributeValue::S(lei.to_string()));
+            exclusive_start_key.insert("TimeStamp".to_string(), AttributeValue::N(letime.to_string()));
+            query = query.set_exclusive_start_key(Some(exclusive_start_key));
         }
 
         // Run the scan
-        let result = scan
+        let result = query
             .send()
             .await
             .map_err(|e| format!("Error executing scan: {:?}", e))?;
@@ -279,18 +315,27 @@ impl UrlShortener {
 
         // Set the last_evaluated_id from the result
         // If the key is Empty that means the last page of results has been processed.
-        let last_evaluated_id = result
-            .last_evaluated_key
-            .unwrap_or_default() // Get somethign or just be None
-            .get("LinkId")
-            .map(|s| s.as_s().unwrap().to_string()); // TODO: Handle unwrap()
-                                                     //
-        let has_more = last_evaluated_id.is_some();                        
+                // Extract pagination tokens
+        let (last_evaluated_id, last_evaluated_timestamp) = 
+            if let Some(last_key) = result.last_evaluated_key {
+                (
+                    last_key.get("LinkId")
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string()),
+                    last_key.get("TimeStamp")
+                        .and_then(|v| v.as_n().ok())
+                        .map(|s| s.to_string())
+                )
+            } else {
+                (None, None)
+            };
+        let has_more = last_evaluated_id.is_some() && last_evaluated_timestamp.is_some();
 
         // Return the ListShortUrlResponse Struct with all the urls
         Ok(ListShortUrlResponse {
             short_urls,
             last_evaluated_id,
+            last_evaluated_timestamp,
             has_more,
         })
     }
