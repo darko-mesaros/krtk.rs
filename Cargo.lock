@@ -1926,7 +1926,6 @@ name = "process_analytics"
 version = "0.1.0"
 dependencies = [
  "aws_lambda_events 0.15.1",
- "base64 0.22.1",
  "lambda_runtime",
  "tokio",
 ]
