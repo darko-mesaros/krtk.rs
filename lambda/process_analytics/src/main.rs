@@ -42,7 +42,7 @@ pub async fn function_handler(event: LambdaEvent<KinesisEvent>) -> Result<(), Er
                 .trim_start_matches("/")    // Remove the "/" at the front
                 .to_string(), 
         };
-        tracing::info!("RECORD: {:?}", analytics);
+        tracing::info!("LINK ID: {:?}", analytics.link_id);
 
         // TODO: Implement the actual functionality
     }
