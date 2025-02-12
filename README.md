@@ -19,6 +19,7 @@ Huge shout out to [Luciano](https://www.linkedin.com/in/lucianomammino/) and [Ja
 │   ├── create_link             # Lambda function for creating short links
 │   ├── get_links               # Lambda function for retrieving links
 │   └── visit_link              # Lambda function for handling link visits
+│   └── process_analytics       # Lambda function for analytics processing 
 ├── lib
 │   ├── certificate-stack.ts    # Stack for SSL certificate
 │   └── krtk-rs-stack.ts        # Main infrastructure stack
@@ -97,8 +98,9 @@ After deployment, you can use the URL shortener by:
 
 2. User visits a short link:
    - Request is routed through CloudFront to API Gateway
-   - `visit_link` Lambda function looks up the original URL in DynamoDB
-   - Function increments the visit count and returns a redirect response
+   - `visit_link` Lambda function looks up the original URL in DynamoDB and returns the original link.
+   - The realtime log is sent from *CloudFront* to a Kinesis stream.
+   - The `process_analytics` function increments the visit count.
 
 3. Retrieving list of links:
    - Frontend JavaScript sends a GET request to `/api/links`
@@ -106,6 +108,9 @@ After deployment, you can use the URL shortener by:
    - Response with list of links is sent back and displayed on the frontend
 
 ```
+            [Kinesis] ------------------------+
+                ^                             |
+                |                             v
 [User] -> [CloudFront] -> [API Gateway] -> [Lambda] <-> [DynamoDB]
   ^           |
   |           v
@@ -122,6 +127,7 @@ The project uses AWS CDK to define and deploy the following resources:
   - `createLink`: Creates new short links
   - `getLinks`: Retrieves list of links
   - `visitLink`: Handles link visits and redirects
+  - `processAnalyticsLambda`: Handles the CF access logs from kinesis
 
 - DynamoDB:
   - `linkTable`: Stores short link data
@@ -131,6 +137,9 @@ The project uses AWS CDK to define and deploy the following resources:
 
 - CloudFront:
   - Distribution for serving the website and API
+
+- Kinesis:
+  - Receving realtime acces logs from CloudFront
 
 - API Gateway:
   - HTTP API for handling link operations

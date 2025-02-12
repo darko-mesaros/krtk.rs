@@ -214,24 +214,20 @@ impl UrlShortener {
                                                                 // it to this formatted string.
     }
     // Get the url from DynamoDB AND increment the count
-    pub async fn retrieve_url_and_increment_count(
+    pub async fn retrieve_url(
         &self,
         short_url: &str,
     ) -> Result<Option<String>, String> {
         let result = self
             .dynamodb_client
-            .update_item()
+            .get_item()
             .table_name(&self.dynamodb_urls_table)
             .key("LinkId", AttributeValue::S(short_url.to_string()))
-            .update_expression("SET Clicks = Clicks + :val")
-            .expression_attribute_values(":val", AttributeValue::N("1".to_string()))
-            .condition_expression("attribute_exists(LinkId)")
-            .return_values(ReturnValue::AllNew)
             .send()
             .await
             .map(|record| {
                 // Succesfull retrieve from DynamoDB
-                record.attributes.and_then(|attributes| {
+                record.item.and_then(|attributes| {
                     // If there is (Some)thing in the Item
                     attributes.get("OriginalLink").and_then(
                         |v| // If there is Some with an attr "OriginalLink"
@@ -244,21 +240,36 @@ impl UrlShortener {
         match result {
             Err(e) => {
                 // Generate a generic Error message just in case.
-                let generic_err_msg = format!("Error incrementing clicks: {:?}", e);
-
-                // Checking if the error is Conditional Check failed Exception, basically if the
-                // URL does not exist. We do not want to error out just return none so we can 404
-                if e.into_service_error()
-                    .is_conditional_check_failed_exception()
-                {
-                    // Just return None
-                    Ok(None)
-                } else {
-                    // Otherwise just return a generic error message
-                    Err(generic_err_msg)
-                }
+                let generic_err_msg = format!("Error retrieving URL: {:?}", e);
+                Err(generic_err_msg)
             }
             Ok(result) => Ok(result),
+        }
+    }
+    // Increment Click Count
+    pub async fn increment_click_count(
+        &self,
+        short_url: &str,
+    ) -> Result<(), String> {
+        let result = self
+            .dynamodb_client
+            .update_item()
+            .table_name(&self.dynamodb_urls_table)
+            .key("LinkId", AttributeValue::S(short_url.to_string()))
+            .update_expression("SET Clicks = Clicks + :val")
+            .expression_attribute_values(":val", AttributeValue::N("1".to_string()))
+            .condition_expression("attribute_exists(LinkId)")
+            .return_values(ReturnValue::AllNew)
+            .send()
+            .await;
+
+        match result {
+            Err(e) => {
+                // Generate a generic Error message just in case.
+                let generic_err_msg = format!("Error incrementing clicks: {:?}", e);
+                Err(generic_err_msg)
+            }
+            Ok(_) => Ok(()),
         }
     }
 

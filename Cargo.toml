@@ -6,4 +6,5 @@ members = [ "lambda/create_link",
   "lambda/create_link",
   "lambda/get_links",
   "lambda/visit_link",
+  "lambda/process_analytics",
 ]
