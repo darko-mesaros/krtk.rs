@@ -24,7 +24,7 @@ async fn function_handler(
     }
 
     let full_url = url_shortener
-        .retrieve_url_and_increment_count(link_id)
+        .retrieve_url(link_id)
         .await;
 
     match full_url {

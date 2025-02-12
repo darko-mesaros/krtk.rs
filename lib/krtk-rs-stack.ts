@@ -114,7 +114,7 @@ export class KrtkRsStack extends cdk.Stack {
     });
     // Table permissions
     linkDatabase.grantReadData(getLinksLambda);
-    linkDatabase.grantReadWriteData(visitLinkLambda);
+    linkDatabase.grantReadData(visitLinkLambda);
     linkDatabase.grantWriteData(createLinkLambda);
 
     const processAnalyticsLambda = new RustFunction(this, 'processAnalyticsLambda', {
@@ -132,6 +132,7 @@ export class KrtkRsStack extends cdk.Stack {
       batchSize: 1,
       startingPosition: StartingPosition.TRIM_HORIZON,
     }));
+    linkDatabase.grantWriteData(processAnalyticsLambda);
 
     // HTTP Api
     const api = new HttpApi(this, 'httpApi',{

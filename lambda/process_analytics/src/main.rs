@@ -1,12 +1,12 @@
 use lambda_runtime::{run, service_fn, tracing, Error, LambdaEvent};
-
+use shared::core::UrlShortener;
 use aws_lambda_events::event::kinesis::KinesisEvent;
+use std::env;
 
 //TODO: for next stream
 // Do something with the struct
-// Remove the `\n` from the `link_id` field
-// Store it in DynamoDB
-//  - Get update the clicks
+// - [x] Remove the `\n` from the `link_id` field 
+// - [x] Store it in DynamoDB
 
 #[derive(Debug)]
 pub struct CfAnalyticsData {
@@ -16,7 +16,10 @@ pub struct CfAnalyticsData {
     link_id: String,
 }
 
-pub async fn function_handler(event: LambdaEvent<KinesisEvent>) -> Result<(), Error> {
+pub async fn function_handler(
+    url_shortener: &UrlShortener,
+    event: LambdaEvent<KinesisEvent>
+    ) -> Result<(), Error> {
     // Extract some useful information from the request
     let records = event.payload.records;
 
@@ -42,9 +45,7 @@ pub async fn function_handler(event: LambdaEvent<KinesisEvent>) -> Result<(), Er
                 .trim_start_matches("/")    // Remove the "/" at the front
                 .to_string(), 
         };
-        tracing::info!("LINK ID: {:?}", analytics.link_id);
-
-        // TODO: Implement the actual functionality
+        url_shortener.increment_click_count(&analytics.link_id).await?;
     }
 
     Ok(())
@@ -53,6 +54,13 @@ pub async fn function_handler(event: LambdaEvent<KinesisEvent>) -> Result<(), Er
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing::init_default_subscriber();
+    // Get the table name from the env variables
+    let table_name = env::var("TABLE_NAME").expect("No TABLE_NAME environment variable set");
+    // Set up the AWS DynamoDB SDK Client
+    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
 
-    run(service_fn(function_handler)).await
+    let shortener = UrlShortener::new(&table_name, dynamodb_client);
+
+    run(service_fn(|event| function_handler(&shortener, event))).await
 }
