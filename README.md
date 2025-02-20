@@ -163,7 +163,7 @@ Here is the stuff that need to be implemented to make this project production-re
 ### Feature Enhancements 🚀
 - [ ] **Handle blocked websites**: Improve handling when scraping website titles and images, especially when blocked by Cloudflare or other protections.
 - [ ] **Implement Auth**: Use [Amazon Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools.html) to add authentication.
-- [ ] **Shorter links**: Investigate ways to generate shorter URLs (e.g., shorter UUIDs or custom short codes).
+- [x] **Shorter links**: Investigate ways to generate shorter URLs (e.g., shorter UUIDs or custom short codes).
 
 ### Front End ✨
 - [x] **Order links by creation**: Figure out how to order retrieved links by date created.
