@@ -1,14 +1,18 @@
 use std::collections::HashMap;
 
+use aws_sdk_dynamodb::operation::put_item::PutItemError;
 use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
+use aws_sdk_dynamodb::error::SdkError;
 use cuid2::CuidConstructor;
+use lambda_http::tracing;
 use serde::{Deserialize, Serialize};
 use chrono::Utc;
 
 use crate::url_info::UrlInfo;
 
 const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
+const URL_LENGTH: u16 = 7;  // The lenght of the shortened URL for CUID2 to generate
 
 #[derive(Deserialize)]
 pub struct ShortenUrlRequest {
@@ -210,8 +214,24 @@ impl UrlShortener {
                 image: url_details.image,
                 timestamp: current_time, //TODO: Clean this up
             })
-            .map_err(|e| format!("Error adding item: {:?}", e)) // OR if there is an error, mapping
-                                                                // it to this formatted string.
+            .map_err(|e| match e {
+                SdkError::ServiceError(err) => {
+                    match err.err() {
+                        PutItemError::ConditionalCheckFailedException(e) => {
+                            tracing::error!("Error creating link {:?}", e);
+                            "The Link ID we tried to create, already exists. Please try again. We are very sorry.".to_string()
+                        },
+                        other_error => {
+                            tracing::error!("Error creating link {:?}", &other_error);
+                            format!("Error creating a link - Service Error: {:?}", other_error)
+                        }
+                    }
+                },
+                other_sdk_error => {
+                    tracing::error!("Error creating link {:?}", &other_sdk_error);
+                    format!("Error creating a link - SDK Error: {:?}", other_sdk_error)
+                }
+            })
     }
     // Get the url from DynamoDB AND increment the count
     pub async fn retrieve_url(
@@ -351,7 +371,7 @@ impl UrlShortener {
         })
     }
     fn generate_short_url(&self) -> String {
-        let idgen = CuidConstructor::new().with_length(10);
+        let idgen = CuidConstructor::new().with_length(URL_LENGTH);
         idgen.create_id()
     }
 }

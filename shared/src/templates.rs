@@ -36,11 +36,19 @@ mod filters {
     }
 }
 
-// ---
+// --- New Link popup
 
 #[derive(Template, Debug)]
 #[template(path = "new_short_link.html")]
 pub struct NewShortLink {
     pub link: String,
     pub domain: &'static str,
+}
+
+// --- Error popup
+
+#[derive(Template, Debug)]
+#[template(path = "error_popup.html")]
+pub struct ErrorPopup {
+    pub message: String,
 }
