@@ -4,7 +4,7 @@ use lambda_http::{run, service_fn, tracing, Error, IntoResponse, Request, Reques
 use shared::core::{ShortenUrlRequest, UrlShortener};
 use shared::response::{empty_response, json_response, html_response};
 use shared::url_info::UrlInfo;
-use shared::templates::{NewShortLink, Template};
+use shared::templates::{NewShortLink, ErrorPopup, Template};
 
 use std::env;
 
@@ -49,6 +49,14 @@ async fn function_handler(
                         // Yes, return the JSON back
                         Ok(response) => json_response(&StatusCode::OK, &response),
                         // No, fail spectacularly
+                        Err(e) if htmx_request.is_some() => {
+                            tracing::error!("Failed to shorten URL 💥 : {:?}", e);
+                            let error_html = ErrorPopup {
+                                message: e,
+                            };
+                            let body = error_html.render()?; // Render HTML
+                            html_response(&StatusCode::OK, body) // Respond with HTML
+                        },
                         Err(e) => {
                             tracing::error!("Failed to shorten URL 💥 : {:?}", e);
                             empty_response(&StatusCode::INTERNAL_SERVER_ERROR)
