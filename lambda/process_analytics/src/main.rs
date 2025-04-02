@@ -45,7 +45,11 @@ pub async fn function_handler(
                 .trim_start_matches("/")    // Remove the "/" at the front
                 .to_string(), 
         };
-        url_shortener.increment_click_count(&analytics.link_id).await?;
+        if let Err(e) = url_shortener.increment_click_count(&analytics.link_id).await {
+            // Log the error but do not fail the function. As this is not a critical thing.
+            tracing::warn!("Failed to increment click count for {}: {:?}", analytics.link_id, e);
+            
+        }
     }
 
     Ok(())

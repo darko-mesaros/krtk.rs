@@ -11,9 +11,11 @@ import { Bucket, BlockPublicAccess } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { Endpoint, RealtimeLogConfig, AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3StaticWebsiteOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { Stream } from 'aws-cdk-lib/aws-kinesis';
+import { Stream, StreamMode } from 'aws-cdk-lib/aws-kinesis';
 import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { StartingPosition } from 'aws-cdk-lib/aws-lambda';
+import { FilterPattern, LogGroup, MetricFilter } from 'aws-cdk-lib/aws-logs';
+import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
 
 interface KrtkRsStackProps extends cdk.StackProps {
   certificateArn: string;
@@ -49,7 +51,10 @@ export class KrtkRsStack extends cdk.Stack {
     });
 
     // Kinesis stream for analytics
-    const cfAnalyticsStream = new Stream(this, 'cfAnalyticsStream');
+    const cfAnalyticsStream = new Stream(this, 'cfAnalyticsStream', {
+       streamMode: StreamMode.ON_DEMAND,
+      retentionPeriod: cdk.Duration.hours(24)
+    });
 
     // Real time Analytics streaming configuration
     const realTimeConfig = new RealtimeLogConfig(this, 'realTimeConfig',{
@@ -247,6 +252,35 @@ export class KrtkRsStack extends cdk.Stack {
         new CloudFrontTarget(cdn)
       ),
       recordName: 'krtk.rs'
+    });
+
+    // METRICS - CLOUDWATCH
+    // const processAnalyticsLogGroup = new LogGroup(this, 'processAnalyticsLogGroup',{
+    //   logGroupName: `/aws/lambda/${processAnalyticsLambda.functionName}`,
+    //   retention: cdk.aws_logs.RetentionDays.ONE_WEEK,
+    //   removalPolicy: cdk.RemovalPolicy.DESTROY,
+    // });
+    //
+    const processAnalyticsLogGroup = LogGroup.fromLogGroupName(this, 'processAnalyticsLogGroup',`/aws/lambda/${processAnalyticsLambda.functionName}`);
+
+    const invalidUrlMetricFilter = new MetricFilter(this, 'invalidUrlMetricFilter', {
+      logGroup: processAnalyticsLogGroup,
+      filterPattern: FilterPattern.stringValue('$.level', '=', 'warn'),
+      metricNamespace: 'KrtkRs',
+      metricName: 'InvalidUrlWarnings',
+      defaultValue: 0,
+    });
+
+    const invalidUrlAlarm = new Alarm(this, 'invalidUrlAlarm',{
+      metric: invalidUrlMetricFilter.metric({
+        period: cdk.Duration.minutes(5),
+        statistic: 'Sum',
+      }),
+      threshold: 10,
+      evaluationPeriods: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+      alarmDescription: 'Alarm when too many invalid URLs are processed'
     });
   }
 }
