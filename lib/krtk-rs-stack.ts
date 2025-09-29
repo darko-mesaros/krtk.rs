@@ -112,7 +112,7 @@ export class KrtkRsStack extends cdk.Stack {
     const visitLinkLambda = new RustFunction(this, 'visitLink', {
       manifestPath: 'lambda/visit_link/Cargo.toml',
       runtime: 'provided.al2023',
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(45),
       environment: {
         TABLE_NAME: linkDatabase.tableName,
       }
@@ -254,14 +254,15 @@ export class KrtkRsStack extends cdk.Stack {
       recordName: 'krtk.rs'
     });
 
-    // METRICS - CLOUDWATCH
-    // const processAnalyticsLogGroup = new LogGroup(this, 'processAnalyticsLogGroup',{
-    //   logGroupName: `/aws/lambda/${processAnalyticsLambda.functionName}`,
-    //   retention: cdk.aws_logs.RetentionDays.ONE_WEEK,
-    //   removalPolicy: cdk.RemovalPolicy.DESTROY,
-    // });
-    //
-    const processAnalyticsLogGroup = LogGroup.fromLogGroupName(this, 'processAnalyticsLogGroup',`/aws/lambda/${processAnalyticsLambda.functionName}`);
+    // METRICS - CLOUDWATCH - Needed because the log group is not created during first run.
+    const processAnalyticsLogGroup = new LogGroup(this, 'processAnalyticsLogGroup',{
+      logGroupName: `/aws/lambda/${processAnalyticsLambda.functionName}`,
+      retention: cdk.aws_logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    // const processAnalyticsLogGroup = LogGroup.fromLogGroupName(this, 'processAnalyticsLogGroup',`/aws/lambda/${processAnalyticsLambda.functionName}`);
+    processAnalyticsLogGroup.node.addDependency(processAnalyticsLambda);
 
     const invalidUrlMetricFilter = new MetricFilter(this, 'invalidUrlMetricFilter', {
       logGroup: processAnalyticsLogGroup,
@@ -270,6 +271,7 @@ export class KrtkRsStack extends cdk.Stack {
       metricName: 'InvalidUrlWarnings',
       defaultValue: 0,
     });
+    invalidUrlMetricFilter.node.addDependency(processAnalyticsLogGroup);
 
     const invalidUrlAlarm = new Alarm(this, 'invalidUrlAlarm',{
       metric: invalidUrlMetricFilter.metric({

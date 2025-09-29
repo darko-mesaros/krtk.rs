@@ -388,7 +388,8 @@ impl UrlShortener {
     fn is_valid_url(url: &str) -> bool {
         if let Ok(parsed) = url::Url::parse(&normalize_url(url)) {
             // Check if it has a valid scheme and host
-            parsed.scheme() == "http" || parsed.scheme() == "https"
+        (parsed.scheme() == "http" || parsed.scheme() == "https")
+            && parsed.host_str().is_some_and(|host| host.contains('.'))
         } else {
             false
         }

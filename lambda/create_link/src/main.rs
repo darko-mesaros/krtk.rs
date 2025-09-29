@@ -20,6 +20,7 @@ async fn function_handler(
     // Get the Request
     let shorten_url_request_body = event.payload::<ShortenUrlRequest>()?;
 
+    let htmx_request = event.headers().get("Hx-Request");
     match shorten_url_request_body {
         // If it cannot parse the payload (no "url_to_shorten")
         None => empty_response(&StatusCode::BAD_REQUEST),
@@ -32,7 +33,7 @@ async fn function_handler(
                         .await;
 
                     // See if the request is coming from the front end HTMX
-                    let htmx_request = event.headers().get("Hx-Request");
+                    //let htmx_request = event.headers().get("Hx-Request");
 
                     // See if we managed to shorten it
                     match shortened_url_response {
@@ -62,6 +63,14 @@ async fn function_handler(
                             empty_response(&StatusCode::INTERNAL_SERVER_ERROR)
                         }
                     }
+                },
+                Err(e) if htmx_request.is_some() => {
+                    tracing::error!("Failed to validate URL 💥 : {:?}", e);
+                    let error_html = ErrorPopup {
+                        message: e,
+                    };
+                    let body = error_html.render()?; // Render HTML
+                    html_response(&StatusCode::OK, body) // Respond with HTML
                 },
                 Err(e) => {
                     tracing::error!("Failed to validate URL 💥 : {:?}", e);
