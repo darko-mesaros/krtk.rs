@@ -26,7 +26,7 @@ async fn function_handler(
         None => empty_response(&StatusCode::BAD_REQUEST),
         // Was able to parse the payload, lets shorten it
         Some(shorten_url_request) => {
-            match shorten_url_request.validate() {
+            match shorten_url_request.validate(&url_shortener.shortener_domain) {
                 Ok(ser) => {
                     let shortened_url_response = url_shortener
                         .shorten_url(ser, url_info)
@@ -87,6 +87,7 @@ async fn main() -> Result<(), Error> {
 
     // Get the table name from the env variables
     let table_name = env::var("TABLE_NAME").expect("No TABLE_NAME environment variable set");
+    let shortener_domain = env::var("SHORTENER_DOMAIN").expect("No SHORTENER_DOMAIN environment variable set");
     // Set up the AWS DynamoDB SDK Client
     let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
@@ -101,7 +102,7 @@ async fn main() -> Result<(), Error> {
     let url_info = UrlInfo::new(http_client);
 
     // Creating a new UrlShortener struct with defaults
-    let shortener = UrlShortener::new(&table_name, dynamodb_client);
+    let shortener = UrlShortener::new(&table_name, &shortener_domain, dynamodb_client);
 
     run(service_fn(|event| {
         function_handler(&shortener, &url_info, event)

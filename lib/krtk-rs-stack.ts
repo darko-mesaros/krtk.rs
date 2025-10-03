@@ -99,6 +99,7 @@ export class KrtkRsStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         TABLE_NAME: linkDatabase.tableName,
+        SHORTENER_DOMAIN: 'krtk.rs',
       }
     });
     const getLinksLambda = new RustFunction(this, 'getLinks', {
@@ -107,6 +108,7 @@ export class KrtkRsStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         TABLE_NAME: linkDatabase.tableName,
+        SHORTENER_DOMAIN: 'krtk.rs',
       }
     });
     const visitLinkLambda = new RustFunction(this, 'visitLink', {
@@ -115,6 +117,7 @@ export class KrtkRsStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(45),
       environment: {
         TABLE_NAME: linkDatabase.tableName,
+        SHORTENER_DOMAIN: 'krtk.rs',
       }
     });
     // Table permissions
@@ -128,6 +131,7 @@ export class KrtkRsStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       environment: {
         TABLE_NAME: linkDatabase.tableName,
+        SHORTENER_DOMAIN: 'krtk.rs',
       }
     });
     // Give Function permission to Kinesis

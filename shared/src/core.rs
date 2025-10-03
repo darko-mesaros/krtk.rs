@@ -11,6 +11,9 @@ use chrono::Utc;
 
 use crate::url_info::UrlInfo;
 
+// TODO: Richard Boyd:
+// - Prevent Recursive Links
+
 const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
 const URL_LENGTH: u16 = 7;  // The lenght of the shortened URL for CUID2 to generate
 
@@ -20,11 +23,22 @@ pub struct ShortenUrlRequest {
 }
 
 impl ShortenUrlRequest {
-    pub fn validate(self) -> Result<Self, String> {
+    pub fn validate(self, shortener_domain: &str) -> Result<Self, String> {
+        self.validate_url_format()
+            .and_then(|req| req.validate_not_recursive(shortener_domain))
+    }
+    fn validate_url_format(self) -> Result<Self, String> {
         if !is_valid_url(&self.url_to_shorten) {
             return Err("Invalid URL Provided".to_string());
         }
         Ok(self)
+    }
+    fn validate_not_recursive(self, shortener_domain: &str) -> Result<Self, String> {
+        if is_recursive_url(&self.url_to_shorten, shortener_domain) {
+            return Err(format!("Cannot shorten links, already shortened links of {shortener_domain}").to_string());
+        }
+        Ok(self)
+
     }
 }
 
@@ -129,13 +143,15 @@ impl TryFrom<HashMap<String, AttributeValue>> for ShortUrl {
 #[derive(Debug)]
 pub struct UrlShortener {
     dynamodb_urls_table: String,
+    pub shortener_domain: String,
     dynamodb_client: Client,
 }
 
 impl UrlShortener {
-    pub fn new(dynamodb_urls_table: &str, dynamodb_client: Client) -> Self {
+    pub fn new(dynamodb_urls_table: &str, shortener_domain: &str, dynamodb_client: Client) -> Self {
         Self {
             dynamodb_urls_table: dynamodb_urls_table.to_string(),
+            shortener_domain: shortener_domain.to_string(),
             dynamodb_client,
         }
     }
@@ -392,5 +408,16 @@ impl UrlShortener {
             && parsed.host_str().is_some_and(|host| host.contains('.'))
         } else {
             false
+        }
+    }
+
+    // Check if the url is not the short URL itself
+    fn is_recursive_url(url: &str, shortener_domain: &str) -> bool {
+        if let Ok(parsed) = url::Url::parse(&normalize_url(url)) {
+        parsed.host_str()
+        .map(|host| host == shortener_domain)
+            .unwrap_or(false)
+        } else {
+        false
         }
     }
