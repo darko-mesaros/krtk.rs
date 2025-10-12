@@ -288,5 +288,12 @@ export class KrtkRsStack extends cdk.Stack {
       treatMissingData: TreatMissingData.NOT_BREACHING,
       alarmDescription: 'Alarm when too many invalid URLs are processed'
     });
+
+    // Outputs
+    new cdk.CfnOutput(this, 'distributionId',{
+      value: cdn.distributionId,
+      description: 'CDN ID'
+
+    });
   }
 }

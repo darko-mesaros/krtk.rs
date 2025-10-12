@@ -12,3 +12,6 @@ target
 
 # Website
 !website/assets/*.js
+
+# Outputs
+outputs.json
