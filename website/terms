@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service - krtk.rs</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .contact { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Terms of Service</h1>
+    <p><strong>Last updated:</strong> October 16, 2024</p>
+
+    <h2>1. Service Description</h2>
+    <p>krtk.rs is a URL shortening service provided as a demonstration application. This service comes with no warranty and is provided "as is".</p>
+
+    <h2>2. Data Collection</h2>
+    <p>We collect:</p>
+    <ul>
+        <li>Original URLs that you submit for shortening</li>
+        <li>Timestamps of when URLs are created</li>
+        <li>Basic usage analytics</li>
+    </ul>
+    <p>Data is retained indefinitely unless manually deleted by the service operator.</p>
+
+    <h2>3. Data Sharing</h2>
+    <p>We do not share your data with any third parties.</p>
+
+    <h2>4. Prohibited Uses</h2>
+    <p>You may not use this service to shorten URLs that:</p>
+    <ul>
+        <li>Contain malware, viruses, or other harmful software</li>
+        <li>Are used for phishing or fraudulent activities</li>
+        <li>Violate any applicable laws or regulations</li>
+        <li>Infringe on intellectual property rights</li>
+        <li>Contain spam or unsolicited commercial content</li>
+        <li>Are used to harass, abuse, or harm others</li>
+    </ul>
+
+    <h2>5. Service Availability</h2>
+    <p>This is a demonstration service with no uptime guarantees. The service may be discontinued at any time without notice.</p>
+
+    <h2>6. Limitation of Liability</h2>
+    <p>This service is provided without warranty of any kind. We are not liable for any damages arising from the use of this service.</p>
+
+    <h2>7. Termination</h2>
+    <p>We reserve the right to remove any shortened URLs and terminate access for violations of these terms.</p>
+
+    <div class="contact">
+        <h2>8. Contact Information</h2>
+        <p>For questions, concerns, or to report abuse:</p>
+        <p><strong>GitHub:</strong> <a href="https://github.com/darko-mesaros">https://github.com/darko-mesaros</a></p>
+    </div>
+</body>
+</html>

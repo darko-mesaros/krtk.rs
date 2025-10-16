@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - krtk.rs</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .contact { background: #f5f5f5; padding: 15px; border-radius: 5px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Policy</h1>
+    <p><strong>Last updated:</strong> October 16, 2024</p>
+
+    <h2>1. Information We Collect</h2>
+    <p>When you use krtk.rs, we store only the following information in our database:</p>
+    <ul>
+        <li><strong>Original URL:</strong> The URL you submit for shortening</li>
+        <li><strong>Short URL:</strong> The shortened URL we generate</li>
+        <li><strong>Timestamp:</strong> When the short URL was created</li>
+    </ul>
+    <p>We do not collect or store IP addresses, browser information, usage patterns, or any other personal data.</p>
+
+    <h2>2. How We Use Your Information</h2>
+    <p>The stored information is used solely to:</p>
+    <ul>
+        <li>Provide the URL shortening and redirection service</li>
+        <li>Maintain the mapping between short and original URLs</li>
+    </ul>
+
+    <h2>3. Data Retention</h2>
+    <p>We retain your data indefinitely unless manually deleted by the service operator. This is a demonstration application with no automated data deletion policies.</p>
+
+    <h2>4. Data Sharing</h2>
+    <p>We do not sell, trade, or share your information with any third parties.</p>
+
+    <h2>5. Data Security</h2>
+    <p>While we implement reasonable security measures, this is a demonstration service provided "as is" with no security guarantees.</p>
+
+    <h2>6. Your Rights</h2>
+    <p>You may request information about data we have stored or request deletion by contacting us through the information below.</p>
+
+    <h2>7. Changes to This Policy</h2>
+    <p>We may update this privacy policy at any time. Changes will be posted on this page.</p>
+
+    <div class="contact">
+        <h2>8. Contact Information</h2>
+        <p>For privacy-related questions or requests:</p>
+        <p><strong>GitHub:</strong> <a href="https://github.com/darko-mesaros">https://github.com/darko-mesaros</a></p>
+    </div>
+</body>
+</html>

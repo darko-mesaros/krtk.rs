@@ -220,6 +220,32 @@ export class KrtkRsStack extends cdk.Stack {
           cachePolicy: CachePolicy.CACHING_OPTIMIZED,
           originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
         },
+        '/terms': {
+          origin: new S3StaticWebsiteOrigin(hostingBucket),
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+          originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+          responseHeadersPolicy: new cdk.aws_cloudfront.ResponseHeadersPolicy(this, 'TermsResponseHeaders', {
+            customHeadersBehavior: {
+             customHeaders: [
+               { header: 'content-type', value: 'text/html; charset=utf-8', override: true}
+             ]
+            }
+          }),
+        },
+        '/privacy': {
+          origin: new S3StaticWebsiteOrigin(hostingBucket),
+          viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: CachePolicy.CACHING_OPTIMIZED,
+          originRequestPolicy: OriginRequestPolicy.CORS_S3_ORIGIN,
+          responseHeadersPolicy: new cdk.aws_cloudfront.ResponseHeadersPolicy(this, 'PrivacyResponseHeaders', {
+            customHeadersBehavior: {
+             customHeaders: [
+               { header: 'content-type', value: 'text/html; charset=utf-8', override: true}
+             ]
+            }
+          }),
+        },
         '/?*': {
           origin: new HttpOrigin(`${api.apiId}.execute-api.${this.region}.amazonaws.com`,{
             originPath: '/prod',
