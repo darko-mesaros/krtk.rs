@@ -12,6 +12,8 @@ use std::env;
 async fn function_handler(
     url_shortener: &UrlShortener,
     url_info: &UrlInfo,
+    secrets_client: &aws_sdk_secretsmanager::Client,
+    secret_arn: &str,
     event: Request,
 ) -> Result<impl IntoResponse, Error> {
     // Tracing
@@ -26,7 +28,7 @@ async fn function_handler(
         None => empty_response(&StatusCode::BAD_REQUEST),
         // Was able to parse the payload, lets shorten it
         Some(shorten_url_request) => {
-            match shorten_url_request.validate(&url_shortener.shortener_domain) {
+            match shorten_url_request.validate(&url_shortener.shortener_domain, secrets_client, secret_arn, &url_info.http_client).await {
                 Ok(ser) => {
                     let shortened_url_response = url_shortener
                         .shorten_url(ser, url_info)
@@ -88,9 +90,11 @@ async fn main() -> Result<(), Error> {
     // Get the table name from the env variables
     let table_name = env::var("TABLE_NAME").expect("No TABLE_NAME environment variable set");
     let shortener_domain = env::var("SHORTENER_DOMAIN").expect("No SHORTENER_DOMAIN environment variable set");
+    let secret_arn = env::var("GOOGLE_API_KEY_SECRET").expect("No GOOGLE_API_KEY_SECRET environment variable set");
     // Set up the AWS DynamoDB SDK Client
     let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
     let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
+    let secrets_client = aws_sdk_secretsmanager::Client::new(&config);
 
     // Http Client for retrieving additional information from the posted URLs
     // NOTE: We are using the shared reqwest from the shared library - re:export
@@ -105,7 +109,7 @@ async fn main() -> Result<(), Error> {
     let shortener = UrlShortener::new(&table_name, &shortener_domain, dynamodb_client);
 
     run(service_fn(|event| {
-        function_handler(&shortener, &url_info, event)
+        function_handler(&shortener, &url_info, &secrets_client, &secret_arn, event)
     }))
     .await
 }

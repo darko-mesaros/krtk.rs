@@ -16,9 +16,11 @@ import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { StartingPosition } from 'aws-cdk-lib/aws-lambda';
 import { FilterPattern, LogGroup, MetricFilter } from 'aws-cdk-lib/aws-logs';
 import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 
 interface KrtkRsStackProps extends cdk.StackProps {
   certificateArn: string;
+  googleApiKeySecret: Secret
 }
 
 export class KrtkRsStack extends cdk.Stack {
@@ -124,6 +126,12 @@ export class KrtkRsStack extends cdk.Stack {
     linkDatabase.grantReadData(getLinksLambda);
     linkDatabase.grantReadData(visitLinkLambda);
     linkDatabase.grantWriteData(createLinkLambda);
+
+    // Secrets permissions
+    props.googleApiKeySecret.grantRead(createLinkLambda);
+
+    // Append secret
+    createLinkLambda.addEnvironment('GOOGLE_API_KEY_SECRET', props.googleApiKeySecret.secretArn);
 
     const processAnalyticsLambda = new RustFunction(this, 'processAnalyticsLambda', {
       manifestPath: 'lambda/process_analytics/Cargo.toml',

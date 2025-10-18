@@ -14,4 +14,4 @@ target
 !website/assets/*.js
 
 # Outputs
-outputs.json
+*-outputs.json
