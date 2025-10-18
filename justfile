@@ -2,11 +2,12 @@
 DISTRIBUTION_ID := `jq -r '.KrtkRsStack.distributionId // "NOT_DEPLOYED"' main-outputs.json 2>/dev/null || echo "NOT_DEPLOYED"`
 GOOGLE_SECRET_ARN := `jq -r '.SecretsStack.googleApiSecretArn // "NOT_DEPLOYED"' secrets-outputs.json 2>/dev/null || echo "NOT_DEPLOYED"`
 
-# Deploy and save outputs
+# Deploy the main stack and save outputs
 deploy:
   @echo "⏳Deploying the CDK stack..."
   npx cdk deploy KrtkRsStack --outputs-file main-outputs.json
 
+# Deploy the secrets stack and save outputs
 deploy-secrets-stack:
   @echo "⏳Deploying the Secrets CDK stack..."
   npx cdk deploy SecretsStack --outputs-file secrets-outputs.json
@@ -16,6 +17,7 @@ invalidate-cache:
   @echo "⏳Clearing the CDN Cache..."
   aws cloudfront create-invalidation --distribution-id {{DISTRIBUTION_ID}} --paths "/*"
 
+# Store the Google API key for safe website check
 set-google-api-key:
     #!/usr/bin/env bash
     echo -n "Enter Google API key: "
@@ -32,5 +34,6 @@ set-google-api-key:
 clean:
   rm -rf "*-outputs.json"
 
+# Destroy all
 bye: clean
   cdk destroy --force
