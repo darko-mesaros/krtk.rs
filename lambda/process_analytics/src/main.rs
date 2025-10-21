@@ -3,16 +3,11 @@ use shared::core::UrlShortener;
 use aws_lambda_events::event::kinesis::KinesisEvent;
 use std::env;
 
-//TODO: for next stream
-// Do something with the struct
-// - [x] Remove the `\n` from the `link_id` field 
-// - [x] Store it in DynamoDB
-
 #[derive(Debug)]
 pub struct CfAnalyticsData {
-    timestamp: String, // Should be f64 or u64
-    source_ip: String,
-    status_code: String, // Should be an ENUM?
+    _timestamp: String, // Should be f64 or u64
+    _source_ip: String,
+    _status_code: String, // Should be an ENUM?
     link_id: String,
 }
 
@@ -37,9 +32,9 @@ pub async fn function_handler(
 
         // Put it in a Struct
         let analytics = CfAnalyticsData {
-            timestamp: fields[0].to_string(),
-            source_ip: fields[1].to_string(),
-            status_code: fields[2].to_string(),
+            _timestamp: fields[0].to_string(),
+            _source_ip: fields[1].to_string(),
+            _status_code: fields[2].to_string(),
             link_id: fields[3]
                 .trim()                     // .trim() removes the `/n`
                 .trim_start_matches("/")    // Remove the "/" at the front
@@ -48,7 +43,6 @@ pub async fn function_handler(
         if let Err(e) = url_shortener.increment_click_count(&analytics.link_id).await {
             // Log the error but do not fail the function. As this is not a critical thing.
             tracing::warn!("Failed to increment click count for {}: {:?}", analytics.link_id, e);
-            
         }
     }
 
