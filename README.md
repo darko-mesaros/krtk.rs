@@ -150,6 +150,10 @@ The project uses AWS CDK to define and deploy the following resources:
 - ACM:
   - SSL certificate for the custom domain
 
+## URL Validation
+
+In order to use URL validation, you need to have an Google API Key set up, and the *Safe Browsing API* enabled in your Google Project. More info can be found [here](https://developers.google.com/safe-browsing/v4/get-started)
+
 ## TODO 📋
 
 Here is the stuff that need to be implemented to make this project production-ready:

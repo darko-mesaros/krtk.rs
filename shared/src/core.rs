@@ -4,15 +4,14 @@ use aws_sdk_dynamodb::operation::put_item::PutItemError;
 use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::error::SdkError;
+use aws_sdk_secretsmanager::Client as SecretsClient;
 use cuid2::CuidConstructor;
 use lambda_http::tracing;
 use serde::{Deserialize, Serialize};
 use chrono::Utc;
 
 use crate::url_info::UrlInfo;
-
-// TODO: Richard Boyd:
-// - Prevent Recursive Links
+use crate::safe_browsing::is_url_safe;
 
 const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
 const URL_LENGTH: u16 = 7;  // The lenght of the shortened URL for CUID2 to generate
@@ -23,9 +22,14 @@ pub struct ShortenUrlRequest {
 }
 
 impl ShortenUrlRequest {
-    pub fn validate(self, shortener_domain: &str) -> Result<Self, String> {
-        self.validate_url_format()
-            .and_then(|req| req.validate_not_recursive(shortener_domain))
+    pub async fn validate(self, shortener_domain: &str, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<Self, String> {
+
+        // Synchronous validation
+        let validated = self.validate_url_format()
+            .and_then(|req| req.validate_not_recursive(shortener_domain))?;
+
+        // Async validation (slower)
+        validated.validate_safe_browsing(secrets_client, secret_arn, http_client).await
     }
     fn validate_url_format(self) -> Result<Self, String> {
         if !is_valid_url(&self.url_to_shorten) {
@@ -38,7 +42,14 @@ impl ShortenUrlRequest {
             return Err(format!("Cannot shorten links, already shortened links of {shortener_domain}").to_string());
         }
         Ok(self)
+    }
 
+    async fn validate_safe_browsing(self, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<Self, String> {
+        match is_url_safe(&self.url_to_shorten, secrets_client, secret_arn, &http_client).await {
+            Ok(true) => Ok(self),
+            Ok(false) => Err("URL flagged as unsafe by Google Safe Browsing".to_string()),
+            Err(_) => Ok(self), // Fail open - do not block if the APi is down
+        }
     }
 }
 
