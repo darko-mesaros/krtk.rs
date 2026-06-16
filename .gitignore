@@ -15,3 +15,6 @@ target
 
 # Outputs
 *-outputs.json
+
+# Agent task metadata (process bookkeeping, not product code)
+.agents/
