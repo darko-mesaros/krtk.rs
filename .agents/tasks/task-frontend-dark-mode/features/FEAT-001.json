@@ -1,0 +1,20 @@
+{
+  "id": "FEAT-001",
+  "type": "chore",
+  "description": "Establish a green baseline before making changes. Confirm the Rust workspace compiles so we can later verify the shared/templates/*.html fragments (embedded by Askama at compile time) still compile after dark-mode edits.",
+  "status": "completed",
+  "steps": [
+    "From repo root /projects/sandbox/krtk.rs run `cargo check --workspace`. This may compile many dependencies on first run; allow it to finish.",
+    "If `cargo check --workspace` succeeds, the baseline is green. Record the result in this feature's findings.",
+    "If cargo is unavailable or the check fails for reasons unrelated to this task (e.g., missing system deps, network for crates), record exactly what happened in findings and note that template verification will rely on Askama syntax review instead. Do not attempt to fix unrelated pre-existing failures."
+  ],
+  "acceptance_criteria": [
+    "`cargo check --workspace` has been run from the repo root and its outcome (pass/fail with reason) is recorded in findings.",
+    "Baseline state is documented so post-change verification can be compared against it."
+  ],
+  "verification": [
+    "Run `cargo check --workspace` from /projects/sandbox/krtk.rs and capture the exit status."
+  ],
+  "blocked_reason": null,
+  "findings": "PASS. Ran `cargo check --workspace` from /projects/sandbox/krtk.rs. Exit status 0. All crates resolved (no network/crate-download failure encountered despite restricted mode; dependencies were already available/cached) and compiled cleanly: shared v0.1.0 (embeds shared/templates/*.html via Askama), get_links, create_link, process_analytics, visit_link. Finished dev profile in 46.83s. Baseline is GREEN. This means the three Askama fragments (error_popup.html, links_table.html, new_short_link.html) currently compile and embed correctly. Post-change verification for FEAT-002 should re-run `cargo check --workspace` and expect the same green result; any new failure would indicate the dark-mode edits broke Askama template syntax. No code changes made in this feature."
+}
