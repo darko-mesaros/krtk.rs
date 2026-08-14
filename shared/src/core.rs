@@ -12,6 +12,7 @@ use chrono::Utc;
 
 use crate::url_info::UrlInfo;
 use crate::safe_browsing::is_url_safe;
+use crate::error::AppError;
 
 const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
 const URL_LENGTH: u16 = 7;  // The lenght of the shortened URL for CUID2 to generate
@@ -22,7 +23,7 @@ pub struct ShortenUrlRequest {
 }
 
 impl ShortenUrlRequest {
-    pub async fn validate(self, shortener_domain: &str, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<Self, String> {
+    pub async fn validate(self, shortener_domain: &str, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<Self, AppError> {
 
         // Synchronous validation
         let validated = self.validate_url_format()
@@ -31,24 +32,24 @@ impl ShortenUrlRequest {
         // Async validation (slower)
         validated.validate_safe_browsing(secrets_client, secret_arn, http_client).await
     }
-    fn validate_url_format(self) -> Result<Self, String> {
+    fn validate_url_format(self) -> Result<Self, AppError> {
         if !is_valid_url(&self.url_to_shorten) {
-            return Err("Invalid URL Provided".to_string());
+            return Err(AppError::Validation("Invalid URL Provided".to_string()));
         }
         Ok(self)
     }
-    fn validate_not_recursive(self, shortener_domain: &str) -> Result<Self, String> {
+    fn validate_not_recursive(self, shortener_domain: &str) -> Result<Self, AppError> {
         if is_recursive_url(&self.url_to_shorten, shortener_domain) {
-            return Err(format!("Cannot shorten links, already shortened links of {shortener_domain}").to_string());
+            return Err(AppError::Validation(format!("Cannot shorten links, already shortened links of {shortener_domain}")));
         }
         Ok(self)
     }
 
-    async fn validate_safe_browsing(self, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<Self, String> {
-        match is_url_safe(&self.url_to_shorten, secrets_client, secret_arn, &http_client).await {
+    async fn validate_safe_browsing(self, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<Self, AppError> {
+        match is_url_safe(&self.url_to_shorten, secrets_client, secret_arn, http_client).await {
             Ok(true) => Ok(self),
-            Ok(false) => Err("URL flagged as unsafe by Google Safe Browsing".to_string()),
-            Err(_) => Ok(self), // Fail open - do not block if the APi is down
+            Ok(false) => Err(AppError::SafeBrowsing("URL flagged as unsafe by Google Safe Browsing".to_string())),
+            Err(_) => Ok(self), // Fail open - do not block if the API is down
         }
     }
 }
@@ -68,7 +69,13 @@ pub struct ListShortUrlResponse {
     pub has_more: bool,
 }
 
-// A struct that will contain info about our Short links
+// A struct that will contain info about our Short links.
+//
+// These field names ARE the public API contract: they appear verbatim in the
+// /api/links JSON and are what `templates::Link` deserializes for the HTMX
+// partial. Do NOT put #[serde(rename = ...)] on them -- DynamoDB attribute
+// naming belongs on ShortUrlRow below. (Renaming these to the DynamoDB
+// PascalCase names broke both the JSON contract and the HTMX path with a 500.)
 #[derive(Debug, Serialize)]
 pub struct ShortUrl {
     pub link_id: String,
@@ -81,72 +88,42 @@ pub struct ShortUrl {
     timestamp: i64,
 }
 
-// We are implementing a TryFrom for ShortUrl
-// TryFrom comes from the standard Rust library, its basically the same as From, but it can fail.
-// Hence the Try. What we are doing here is Trying to convert HashMap<String, AttributeValue> to
-// ShortUrl
-impl TryFrom<HashMap<String, AttributeValue>> for ShortUrl {
-    // Just a string for an error is fine for now
-    type Error = String;
+// Persistence shape: mirrors the DynamoDB attribute names exactly, for
+// serde_dynamo. Deliberately a separate type from ShortUrl -- a single type
+// cannot carry both namings, because serde renames apply to Serialize and
+// Deserialize alike.
+#[derive(Debug, Deserialize)]
+struct ShortUrlRow {
+    #[serde(rename = "LinkId")]
+    link_id: String,
+    #[serde(rename = "OriginalLink")]
+    original_link: String,
+    #[serde(rename = "Clicks")]
+    clicks: u32,
+    #[serde(rename = "Title")]
+    title: Option<String>,
+    #[serde(rename = "Description")]
+    description: Option<String>,
+    #[serde(rename = "ContentType")]
+    content_type: Option<String>,
+    #[serde(rename = "Image")]
+    image: Option<String>,
+    #[serde(rename = "TimeStamp")]
+    timestamp: i64,
+}
 
-    // The TryFrom Trait requires us to implement a single method called try_from() - this.
-    fn try_from(item: HashMap<String, AttributeValue>) -> Result<Self, Self::Error> {
-        let link_id = item
-            .get("LinkId")
-            .ok_or_else(|| "LinkId not found".to_string())?
-            .as_s()
-            .map(|s| s.to_string())
-            .map_err(|_| "LinkId is not a String".to_string())?;
-        let original_link = item
-            .get("OriginalLink")
-            .ok_or_else(|| "OriginalLink not found".to_string())?
-            .as_s()
-            .map(|s| s.to_string())
-            .map_err(|_| "OriginalLink is not a String".to_string())?;
-        let clicks = item
-            .get("Clicks")
-            .ok_or_else(|| "Clicks not found".to_string())?
-            .as_n() // Returns the Number (DynamoDB attr) as String
-            .map_err(|_| "Clicks is not a Number".to_string())
-            .and_then(|n| {
-                // We then try to conver it into an actual u32
-                n.parse::<u32>()
-                    .map_err(|_| "Cannot convert Clicks into u32".to_string())
-            })?;
-
-        // Why are we not doing as much checking as above? Is it because these are Options?
-        let content_type = item
-            .get("ContentType")
-            .and_then(|c| c.as_s().map(|s| s.to_string()).ok());
-        let title = item
-            .get("Title")
-            .and_then(|c| c.as_s().map(|s| s.to_string()).ok());
-        let description = item
-            .get("Description")
-            .and_then(|c| c.as_s().map(|s| s.to_string()).ok());
-        let image = item
-            .get("Image")
-            .and_then(|c| c.as_s().map(|s| s.to_string()).ok());
-        let timestamp = item
-            .get("TimeStamp")
-            .ok_or_else(|| "TimeStamp not found".to_string())?
-            .as_n() // Returns the Number (DynamoDB attr) as String
-            .map_err(|_| "TimeStamp is not a Number".to_string())
-            .and_then(|n| {
-                // We then try to conver it into an actual u32
-                n.parse::<i64>()
-                    .map_err(|_| "Cannot convert TimeStamp into i64".to_string())
-            })?;
-        Ok(Self {
-            link_id,
-            original_link,
-            clicks,
-            title,
-            description,
-            content_type,
-            image,
-            timestamp
-        })
+impl From<ShortUrlRow> for ShortUrl {
+    fn from(row: ShortUrlRow) -> Self {
+        Self {
+            link_id: row.link_id,
+            original_link: row.original_link,
+            clicks: row.clicks,
+            title: row.title,
+            description: row.description,
+            content_type: row.content_type,
+            image: row.image,
+            timestamp: row.timestamp,
+        }
     }
 }
 // We are passing the DDB client as well as the table name in the UrlShortener struct.
@@ -172,7 +149,7 @@ impl UrlShortener {
         &self,
         req: ShortenUrlRequest,
         url_info: &UrlInfo,
-    ) -> Result<ShortUrl, String> {
+    ) -> Result<ShortUrl, AppError> {
 
         // Normalize the URL before:
         let normalized_url = normalize_url(&req.url_to_shorten);
@@ -246,17 +223,17 @@ impl UrlShortener {
                     match err.err() {
                         PutItemError::ConditionalCheckFailedException(e) => {
                             tracing::error!("Error creating link {:?}", e);
-                            "The Link ID we tried to create, already exists. Please try again. We are very sorry.".to_string()
+                            AppError::Validation("The Link ID we tried to create, already exists. Please try again.".to_string())
                         },
                         other_error => {
                             tracing::error!("Error creating link {:?}", &other_error);
-                            format!("Error creating a link - Service Error: {:?}", other_error)
+                            AppError::database(SdkError::ServiceError(err))
                         }
                     }
                 },
                 other_sdk_error => {
                     tracing::error!("Error creating link {:?}", &other_sdk_error);
-                    format!("Error creating a link - SDK Error: {:?}", other_sdk_error)
+                    AppError::database(other_sdk_error)
                 }
             })
     }
@@ -264,7 +241,7 @@ impl UrlShortener {
     pub async fn retrieve_url(
         &self,
         short_url: &str,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, AppError> {
         let result = self
             .dynamodb_client
             .get_item()
@@ -286,9 +263,8 @@ impl UrlShortener {
             });
         match result {
             Err(e) => {
-                // Generate a generic Error message just in case.
-                let generic_err_msg = format!("Error retrieving URL: {:?}", e);
-                Err(generic_err_msg)
+                tracing::error!("Error retrieving URL: {:?}", e);
+                Err(AppError::database(e))
             }
             Ok(result) => Ok(result),
         }
@@ -297,7 +273,7 @@ impl UrlShortener {
     pub async fn increment_click_count(
         &self,
         short_url: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), AppError> {
         let result = self
             .dynamodb_client
             .update_item()
@@ -312,9 +288,8 @@ impl UrlShortener {
 
         match result {
             Err(e) => {
-                // Generate a generic Error message just in case.
-                let generic_err_msg = format!("Error incrementing clicks: {:?}", e);
-                Err(generic_err_msg)
+                tracing::error!("Error incrementing clicks: {:?}", e);
+                Err(AppError::database(e))
             }
             Ok(_) => Ok(()),
         }
@@ -324,7 +299,7 @@ impl UrlShortener {
         &self,
         last_evaluated_id: Option<&str>,
         last_evaluated_timestamp: Option<&str>,
-    ) -> Result<ListShortUrlResponse, String> {
+    ) -> Result<ListShortUrlResponse, AppError> {
         // Run a scan on 25 items, but make it mutable as we may do something in a bit.
         let mut query = self
             .dynamodb_client
@@ -354,21 +329,16 @@ impl UrlShortener {
         let result = query
             .send()
             .await
-            .map_err(|e| format!("Error executing scan: {:?}", e))?;
+            .map_err(AppError::database)?;
 
         // An empty vector to store all teh short_urls
         let mut short_urls = vec![];
 
         // If we get somethign back lets do the try_from() for them into the ShortUrl struct
         if let Some(items) = result.items {
-            for item in items {
-                // ingore the items that cannot be deserialized - for the ones that are broken,
-                // (bad data, missing fields), just ignore them.
-                if let Ok(short_url) = ShortUrl::try_from(item) {
-                    // Add to the vector of ShortUrl
-                    short_urls.push(short_url);
-                }
-            }
+            let rows: Vec<ShortUrlRow> = serde_dynamo::from_items(items)
+                .map_err(AppError::Serialization)?;
+            short_urls = rows.into_iter().map(ShortUrl::from).collect();
         }
 
         // Set the last_evaluated_id from the result
@@ -432,3 +402,157 @@ impl UrlShortener {
         false
         }
     }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Builds the exact item shape `shorten_url` writes to DynamoDB, so these tests fail
+    /// if the writer and the `#[serde(rename)]` attributes on `ShortUrl` ever drift apart.
+    fn stored_item(with_optionals: bool) -> HashMap<String, AttributeValue> {
+        let mut item = HashMap::new();
+        item.insert("SortKey".into(), AttributeValue::S(SORT_KEY_VALUE.into()));
+        item.insert("LinkId".into(), AttributeValue::S("abc1234".into()));
+        item.insert("OriginalLink".into(), AttributeValue::S("https://example.com/".into()));
+        item.insert("Clicks".into(), AttributeValue::N("42".into()));
+        item.insert("TimeStamp".into(), AttributeValue::N("1739035776".into()));
+        if with_optionals {
+            item.insert("Title".into(), AttributeValue::S("Example Domain".into()));
+            item.insert("Description".into(), AttributeValue::S("An example".into()));
+            item.insert("ContentType".into(), AttributeValue::S("text/html".into()));
+            item.insert("Image".into(), AttributeValue::S("https://example.com/og.png".into()));
+        }
+        item
+    }
+
+    #[test]
+    fn deserializes_a_fully_populated_item() {
+        let url: ShortUrlRow = serde_dynamo::from_item(stored_item(true))
+            .expect("a full item written by shorten_url must deserialize");
+
+        assert_eq!(url.link_id, "abc1234");
+        assert_eq!(url.original_link, "https://example.com/");
+        assert_eq!(url.clicks, 42);
+        assert_eq!(url.timestamp, 1_739_035_776);
+        assert_eq!(url.title.as_deref(), Some("Example Domain"));
+        assert_eq!(url.description.as_deref(), Some("An example"));
+        assert_eq!(url.content_type.as_deref(), Some("text/html"));
+        assert_eq!(url.image.as_deref(), Some("https://example.com/og.png"));
+    }
+
+    #[test]
+    fn deserializes_an_item_with_no_scraped_metadata() {
+        // shorten_url omits Title/Description/ContentType/Image entirely when scraping
+        // yields nothing, so absent (not null) optional attributes must be accepted.
+        let url: ShortUrlRow = serde_dynamo::from_item(stored_item(false))
+            .expect("an item without scraped metadata must still deserialize");
+
+        assert_eq!(url.link_id, "abc1234");
+        assert_eq!(url.clicks, 42);
+        assert!(url.title.is_none());
+        assert!(url.description.is_none());
+        assert!(url.content_type.is_none());
+        assert!(url.image.is_none());
+    }
+
+    #[test]
+    fn ignores_unknown_attributes_so_new_columns_do_not_break_reads() {
+        // The auth spec adds OwnerId to this table. Reads must tolerate attributes the
+        // struct does not know about, or deploying the writer first would break listing.
+        let mut item = stored_item(true);
+        item.insert("OwnerId".into(), AttributeValue::S("cognito-sub-123".into()));
+
+        let url: ShortUrlRow = serde_dynamo::from_item(item)
+            .expect("an unknown attribute must not fail deserialization");
+        assert_eq!(url.link_id, "abc1234");
+    }
+
+    #[test]
+    fn a_missing_required_attribute_is_now_an_error_not_a_silent_drop() {
+        // This is the regression guard for the bug this change fixes: list_urls used to
+        // discard malformed items, so a mapping error presented as links vanishing from
+        // the list rather than as a failure.
+        let mut item = stored_item(true);
+        item.remove("OriginalLink");
+
+        let result: Result<ShortUrlRow, _> = serde_dynamo::from_item(item);
+        assert!(result.is_err(), "a missing required attribute must surface as an error");
+    }
+
+    #[test]
+    fn a_wrongly_typed_attribute_is_an_error() {
+        let mut item = stored_item(true);
+        item.insert("Clicks".into(), AttributeValue::S("not-a-number".into()));
+
+        let result: Result<ShortUrlRow, _> = serde_dynamo::from_item(item);
+        assert!(result.is_err(), "a string in a numeric attribute must surface as an error");
+    }
+
+    /// The /api/links JSON field names are a public contract: the browser client and
+    /// `templates::Link` both read them. This pins them so a serde rename added for
+    /// DynamoDB can never silently leak into the API response again (doing exactly
+    /// that returned PascalCase keys and 500'd the HTMX path).
+    #[test]
+    fn short_url_serializes_with_the_public_snake_case_contract() {
+        let row: ShortUrlRow = serde_dynamo::from_item(stored_item(true)).unwrap();
+        let json = serde_json::to_value(ShortUrl::from(row)).unwrap();
+        let obj = json.as_object().expect("ShortUrl must serialize to an object");
+
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            [
+                "clicks",
+                "content_type",
+                "description",
+                "image",
+                "link_id",
+                "original_link",
+                "timestamp",
+                "title",
+            ],
+            "the /api/links wire shape changed -- this is a breaking API change"
+        );
+
+        assert_eq!(obj["link_id"], "abc1234");
+        assert_eq!(obj["clicks"], 42);
+        assert_eq!(obj["timestamp"], 1_739_035_776i64);
+    }
+
+    /// templates::Link is deserialized from the serialized ShortUrl in get_links, so
+    /// the two must stay compatible or the HTMX partial 500s.
+    #[test]
+    fn serialized_short_url_still_deserializes_into_the_template_link() {
+        let row: ShortUrlRow = serde_dynamo::from_item(stored_item(true)).unwrap();
+        let json = serde_json::to_value(ShortUrl::from(row)).unwrap();
+        let link: Result<crate::templates::Link, _> = serde_json::from_value(json);
+        assert!(link.is_ok(), "templates::Link must deserialize the API shape: {link:?}");
+    }
+
+    #[test]
+    fn normalize_url_defaults_to_https_and_preserves_explicit_schemes() {
+        assert_eq!(normalize_url("example.com"), "https://example.com");
+        assert_eq!(normalize_url("//example.com"), "https://example.com");
+        assert_eq!(normalize_url("http://example.com"), "http://example.com");
+        assert_eq!(normalize_url("https://example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn is_valid_url_requires_a_dotted_host() {
+        assert!(is_valid_url("example.com"));
+        assert!(is_valid_url("https://sub.example.co.uk/path?q=1"));
+        assert!(!is_valid_url("localhost"));
+        assert!(!is_valid_url("not a url"));
+        assert!(!is_valid_url(""));
+    }
+
+    #[test]
+    fn is_recursive_url_catches_our_own_domain() {
+        assert!(is_recursive_url("https://krtk.rs/abc1234", "krtk.rs"));
+        assert!(is_recursive_url("krtk.rs/abc1234", "krtk.rs"));
+        assert!(!is_recursive_url("https://example.com/", "krtk.rs"));
+        // A domain that merely ends with ours must not be treated as recursive.
+        assert!(!is_recursive_url("https://notkrtk.rs/x", "krtk.rs"));
+    }
+}

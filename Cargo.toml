@@ -1,10 +1,34 @@
 [workspace]
 resolver = "2"
 
-members = [ "lambda/create_link",
+members = [
   "shared",
   "lambda/create_link",
   "lambda/get_links",
   "lambda/visit_link",
   "lambda/process_analytics",
 ]
+
+[workspace.dependencies]
+lambda_http = "1"
+lambda_runtime = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+aws-config = "1"
+# `default-features = false` drops the SDK crates' default `rustls` feature, which maps to
+# aws-smithy-runtime/tls-rustls -> the LEGACY rustls 0.21 + hyper 0.14 stack. That stack carries
+# RUSTSEC-2026-0098/0099/0104 (rustls-webpki 0.101.7) and is dead weight: BehaviorVersion
+# v2026_01_12 uses the modern client from `default-https-client` (rustls-aws-lc) at runtime.
+aws-sdk-dynamodb = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-sdk-secretsmanager = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aws_lambda_events = { version = "1", default-features = false, features = ["kinesis"] }
+# reqwest 0.13 renamed `rustls-tls` -> `rustls` and split the root store out into its own
+# feature. `webpki-roots` preserves 0.12's `rustls-tls` behaviour (bundled Mozilla root store)
+# rather than depending on whatever cert store the Lambda image ships.
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "json"] }
+chrono = "0.4"
+thiserror = "2"
+serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

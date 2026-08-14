@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use aws_sdk_secretsmanager::Client as SecretsClient;
+use lambda_http::tracing;
+
+use crate::error::AppError;
 
 #[derive(Serialize, Debug)]
 struct SafeBrowsingRequest {
@@ -39,7 +42,7 @@ struct SafeBrowsingResponse {
 
 }
 
-pub async fn is_url_safe(url: &str, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<bool, String> {
+pub async fn is_url_safe(url: &str, secrets_client: &SecretsClient, secret_arn: &str, http_client: &reqwest::Client) -> Result<bool, AppError> {
     let api_key = get_api_key(secrets_client, secret_arn).await?;
 
     let request = SafeBrowsingRequest {
@@ -57,31 +60,40 @@ pub async fn is_url_safe(url: &str, secrets_client: &SecretsClient, secret_arn: 
 
 
     let response: SafeBrowsingResponse = http_client
-        .post(&format!("https://safebrowsing.googleapis.com/v4/threatMatches:find?key={}", api_key))
+        .post(format!("https://safebrowsing.googleapis.com/v4/threatMatches:find?key={}", api_key))
         .json(&request)
         .send()
         .await
-        .map_err(|e| format!("Safe browsing API request failed: {e}"))?
+        .map_err(|e| {
+            tracing::warn!("Safe Browsing API request failed: {e}");
+            AppError::SafeBrowsing("URL safety check is unavailable".to_string())
+        })?
         .json()
         .await
-        .map_err(|e| format!("Failed to parse Safe Browsing response: {e}"))?;
+        .map_err(|e| {
+            tracing::warn!("Failed to parse Safe Browsing response: {e}");
+            AppError::SafeBrowsing("URL safety check returned an unreadable response".to_string())
+        })?;
 
     Ok(response.matches.is_none())
 }
 
-async fn get_api_key(secrets_client: &SecretsClient, secret_arn: &str) -> Result<String, String> {
+async fn get_api_key(secrets_client: &SecretsClient, secret_arn: &str) -> Result<String, AppError> {
 
     let secret_value = secrets_client
         .get_secret_value()
         .secret_id(secret_arn)
         .send()
         .await
-        .map_err(|e| format!("Failed to retrieve API key: {e}"))?;
+        .map_err(|e| {
+            tracing::error!("Failed to retrieve Safe Browsing API key: {e}");
+            AppError::Internal("URL safety check is not configured".to_string())
+        })?;
 
     // Return if there is something there in the secret
     secret_value
         .secret_string()
-        .ok_or_else(|| "API key secret is empty".to_string())
+        .ok_or_else(|| AppError::Internal("URL safety check is not configured".to_string()))
         .map(|s| s.to_string())
 
 }
