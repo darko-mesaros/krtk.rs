@@ -1,5 +1,8 @@
 use reqwest::{Client, Url};
 use scraper::{selector::Selector, Html};
+use lambda_http::tracing;
+
+use crate::error::AppError;
 
 #[derive(Default, Debug)]
 pub struct UrlDetails {
@@ -19,14 +22,17 @@ impl UrlInfo {
         Self { http_client }
     }
 
-    pub async fn fetch_details(&self, url: &str) -> Result<UrlDetails, String> {
+    pub async fn fetch_details(&self, url: &str) -> Result<UrlDetails, AppError> {
         // Making a GET request
         let response = self
             .http_client
             .get(url)
             .send()
             .await
-            .map_err(|e| format!("Cannot scrape '{}': {}", url, e))?;
+            .map_err(|e| {
+                tracing::warn!("Cannot scrape '{}': {}", url, e);
+                AppError::Internal("Could not fetch metadata for the target URL".to_string())
+            })?;
 
         // Getting the content-type from the page
         let content_type = response
@@ -103,10 +109,10 @@ impl UrlInfo {
                     // So let's make sure we include the full url in it:
                     let base_url = Url::parse(url).unwrap(); // TODO: Handle unwrap
 
-                    if let Some(image_path) = image_element.value().attr("src") {
-                        if let Ok(image_url) = base_url.join(image_path) {
-                            image = Some(image_url.to_string());
-                        }
+                    if let Some(image_path) = image_element.value().attr("src")
+                        && let Ok(image_url) = base_url.join(image_path)
+                    {
+                        image = Some(image_url.to_string());
                     }
                 }
             }

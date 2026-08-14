@@ -55,7 +55,7 @@ async fn function_handler(
                         Err(e) if htmx_request.is_some() => {
                             tracing::error!("Failed to shorten URL 💥 : {:?}", e);
                             let error_html = ErrorPopup {
-                                message: e,
+                                message: e.to_string(),
                             };
                             let body = error_html.render()?; // Render HTML
                             html_response(&StatusCode::OK, body) // Respond with HTML
@@ -69,7 +69,7 @@ async fn function_handler(
                 Err(e) if htmx_request.is_some() => {
                     tracing::error!("Failed to validate URL 💥 : {:?}", e);
                     let error_html = ErrorPopup {
-                        message: e,
+                        message: e.to_string(),
                     };
                     let body = error_html.render()?; // Render HTML
                     html_response(&StatusCode::OK, body) // Respond with HTML
@@ -92,7 +92,7 @@ async fn main() -> Result<(), Error> {
     let shortener_domain = env::var("SHORTENER_DOMAIN").expect("No SHORTENER_DOMAIN environment variable set");
     let secret_arn = env::var("GOOGLE_API_KEY_SECRET").expect("No GOOGLE_API_KEY_SECRET environment variable set");
     // Set up the AWS DynamoDB SDK Client
-    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let config = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12()).load().await;
     let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
     let secrets_client = aws_sdk_secretsmanager::Client::new(&config);
 
