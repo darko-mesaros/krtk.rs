@@ -1,0 +1,50 @@
+{
+  "decisions": [
+    {
+      "id": "askama-vs-rinja",
+      "title": "Migrate askama to rinja (its maintained successor) rather than staying on frozen 0.12.1?",
+      "options": ["Migrate to rinja (maintained, API-compatible)", "Stay on askama 0.12.1 (frozen, no updates)"],
+      "recommended": "Migrate to rinja (maintained, API-compatible)",
+      "answer": "Migrate to rinja (maintained, API-compatible)"
+    },
+    {
+      "id": "implicit-log-group-conflict",
+      "title": "How to handle existing implicit CloudWatch log groups that conflict with new explicit ones?",
+      "options": ["Delete existing implicit groups before deploy", "Import existing groups with fromLogGroupName"],
+      "recommended": "Delete existing implicit groups before deploy",
+      "answer": "Delete existing implicit groups before deploy"
+    },
+    {
+      "id": "cargo-lambda-install",
+      "title": "Install cargo-lambda or just verify existing installation?",
+      "options": ["Install from scratch", "Verify existing installation only"],
+      "recommended": "Verify existing installation only",
+      "answer": "Verify existing installation only"
+    },
+    {
+      "id": "deployment-context",
+      "title": "Treat as dev/test environment or brand-new production?",
+      "options": ["Dev/test (lenient)", "Brand-new production (single user)"],
+      "recommended": "Brand-new production (single user)",
+      "answer": "Brand-new production (single user)"
+    },
+    {
+      "id": "typescript-7-scope",
+      "title": "TypeScript 7 (native rewrite) drops the JS compiler API that ts-node and ts-jest need. Pin to 6.0.3 or migrate to TS 7 now?",
+      "options": ["Pin TypeScript to 6.0.3 and file TS 7 as a follow-up", "Migrate to TypeScript 7 now (@typescript/native + ts-jest alias)"],
+      "recommended": "Pin TypeScript to 6.0.3 and file TS 7 as a follow-up",
+      "answer": "Pin TypeScript to 6.0.3 and file TS 7 as a follow-up"
+    },
+    {
+      "id": "deployment-sequencing",
+      "title": "Nothing is deployed yet (cdk diff shows all resources as new). Deploy Phase A and Phase B separately as planned, or land the hardening first and deploy once?",
+      "options": ["Land Phase B hardening too, then deploy once", "Keep the two-deploy split as specced", "Hold off on deploying, I'll review the code first"],
+      "recommended": "Land Phase B hardening too, then deploy once",
+      "answer": "Land Phase B hardening too, then deploy once"
+    }
+  ],
+  "blocking": "All code complete and verified (38 CDK tests, 5 Rust tests, clean clippy + cargo audit). Awaiting Darko's go-ahead to run `cdk deploy --all`, which creates real billable AWS resources.",
+  "context": {
+    "template": "feature"
+  }
+}

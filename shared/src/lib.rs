@@ -1,4 +1,5 @@
 pub mod core;
+pub mod error;
 pub mod response;
 pub mod url_info;
 pub mod templates;

@@ -45,7 +45,7 @@ async fn main() -> Result<(), Error> {
     let table_name = env::var("TABLE_NAME").expect("No TABLE_NAME environment variable set");
     let shortener_domain = env::var("SHORTENER_DOMAIN").expect("No SHORTENER_DOMAIN environment variable set");
     // Set up the AWS DynamoDB SDK Client
-    let config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let config = aws_config::defaults(aws_config::BehaviorVersion::v2026_01_12()).load().await;
     let dynamodb_client = aws_sdk_dynamodb::Client::new(&config);
 
     let shortener = UrlShortener::new(&table_name, &shortener_domain, dynamodb_client);

@@ -15,3 +15,6 @@ target
 
 # Outputs
 *-outputs.json
+
+# cdk deploy transcripts (deploy-*.log) -- local troubleshooting artifacts
+*.log
