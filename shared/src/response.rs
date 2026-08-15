@@ -54,6 +54,32 @@ pub fn html_response(status: &StatusCode, body: String) -> Result<Response<Body>
     Ok(response)
 }
 
+/// Respond with an HTML fragment **and** an `HX-Trigger` header, which asks htmx to fire
+/// a named client-side event once the response arrives.
+///
+/// This is how one response updates a second, unrelated region of the page. Minting an
+/// API key swaps the new-key banner into its own target, and the key list needs to
+/// re-fetch itself -- but the list is not the swap target and the fragment cannot reach
+/// it. Naming the event here puts "what else a successful mint changes" in the response,
+/// where the server decides it, instead of hardcoding the consequence into the page.
+///
+/// The event is dispatched on the element that made the request and bubbles, so a
+/// listener elsewhere subscribes with htmx's `from:` modifier (`refreshKeys from:body`).
+pub fn html_response_with_trigger(
+    status: &StatusCode,
+    body: String,
+    trigger_event: &str,
+) -> Result<Response<Body>, Error> {
+    let response = Response::builder()
+        .status(status)
+        .header("content-type", "text/html")
+        .header("HX-Trigger", trigger_event)
+        .body(Body::Text(body))
+        .map_err(Box::new)?;
+
+    Ok(response)
+}
+
 /// Respond with the status an [`AppError`] maps to, and a JSON `{"error": ...}` body.
 ///
 /// Client errors (4xx) return the error's own message, because the caller can act on
@@ -127,5 +153,17 @@ mod tests {
             }
             other => panic!("expected a text body, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn html_response_with_trigger_sets_the_hx_trigger_header() {
+        let resp =
+            html_response_with_trigger(&StatusCode::CREATED, "<p>ok</p>".to_string(), "key-minted")
+                .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        assert_eq!(resp.headers()["content-type"], "text/html");
+        // htmx reads this header verbatim as the event name to dispatch, so a typo or a
+        // wrapped value silently does nothing at all.
+        assert_eq!(resp.headers()["HX-Trigger"], "key-minted");
     }
 }

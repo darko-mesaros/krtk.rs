@@ -1,0 +1,26 @@
+{% if keys.is_empty() %}
+<p class="text-sm text-gray-500 dark:text-gray-400 italic">No API keys.</p>
+{% else %}
+{% for key in keys %}
+<div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-md">
+  <div>
+    <span class="text-sm font-medium">{{ key.label }}</span>
+    <code class="text-xs text-gray-500 dark:text-gray-400">{{ key.prefix }}…</code>
+    <br>
+    <span class="text-xs text-gray-500 dark:text-gray-400">
+      {% if let Some(expires_at) = key.expires_at %}expires {{ expires_at|format_timestamp }}{% else %}no expiry{% endif %}
+      ·
+      {% if let Some(last_used_at) = key.last_used_at %}last used {{ last_used_at|format_timestamp }}{% else %}never used{% endif %}
+    </span>
+  </div>
+  {# The revoke button re-renders the WHOLE list rather than removing its own row: the
+     empty state ("No API keys.") is rendered by this template, so an outerHTML swap that
+     deleted the last row would leave an empty container with no empty state in it. #}
+  <button hx-delete="/api/keys/{{ key.key_id }}"
+          hx-target="#key-list"
+          hx-swap="innerHTML"
+          hx-confirm="Revoke '{{ key.label }}'? Any script using this key stops working immediately."
+          class="text-sm text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 underline">Revoke</button>
+</div>
+{% endfor %}
+{% endif %}
