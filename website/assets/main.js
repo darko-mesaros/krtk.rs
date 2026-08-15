@@ -68,165 +68,17 @@ if (document.readyState === 'loading') {
 }
 
 // --- API Key Management (FR-5.7) --------------------------------------------
-
-async function mintApiKey() {
-    var labelInput = document.getElementById('key-label-input');
-    var expiryInput = document.getElementById('key-expiry-input');
-    var label = (labelInput.value || '').trim();
-    if (!label) {
-        showNotification('Please enter a label for the key');
-        return;
-    }
-
-    var body = { label: label };
-    var expiryDays = parseInt(expiryInput.value, 10);
-    if (expiryDays > 0 && expiryDays <= 365) {
-        body.expires_in_days = expiryDays;
-    }
-
-    try {
-        var token = await window.krtk.getValidAccessToken();
-        var resp = await fetch('/api/keys', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + token,
-            },
-            body: JSON.stringify(body),
-        });
-
-        if (resp.status === 401) {
-            await window.krtk.signOut();
-            return;
-        }
-        if (!resp.ok) {
-            var errData = await resp.text();
-            showNotification('Failed to create key: ' + (errData || resp.status));
-            return;
-        }
-
-        var data = await resp.json();
-        // Show the key exactly once (FR-5.7)
-        var resultDiv = document.getElementById('key-mint-result');
-        var valueEl = document.getElementById('key-mint-value');
-        valueEl.textContent = data.key;
-        resultDiv.classList.remove('hidden');
-
-        // Reset form
-        labelInput.value = '';
-        expiryInput.value = '';
-
-        // Refresh key list
-        loadApiKeys();
-    } catch (e) {
-        showNotification('Error creating key: ' + e.message);
-    }
-}
-
-function copyApiKey() {
-    var valueEl = document.getElementById('key-mint-value');
-    if (valueEl) {
-        navigator.clipboard.writeText(valueEl.textContent).then(function () {
-            showNotification('API key copied to clipboard!');
-        });
-    }
-}
-
-async function revokeApiKey(keyId) {
-    try {
-        var token = await window.krtk.getValidAccessToken();
-        var resp = await fetch('/api/keys/' + encodeURIComponent(keyId), {
-            method: 'DELETE',
-            headers: { 'Authorization': 'Bearer ' + token },
-        });
-        if (resp.status === 401) {
-            await window.krtk.signOut();
-            return;
-        }
-        if (!resp.ok) {
-            showNotification('Failed to revoke key');
-            return;
-        }
-        showNotification('Key revoked');
-        loadApiKeys();
-    } catch (e) {
-        showNotification('Error revoking key: ' + e.message);
-    }
-}
-
-async function loadApiKeys() {
-    var listEl = document.getElementById('key-list');
-    var emptyEl = document.getElementById('key-list-empty');
-    if (!listEl) return;
-
-    try {
-        var token = await window.krtk.getValidAccessToken();
-        var resp = await fetch('/api/keys', {
-            headers: { 'Authorization': 'Bearer ' + token },
-        });
-        if (resp.status === 401) {
-            await window.krtk.signOut();
-            return;
-        }
-        if (!resp.ok) {
-            listEl.innerHTML = '<p class="text-sm text-red-500">Failed to load keys</p>';
-            return;
-        }
-
-        var data = await resp.json();
-        var keys = data.keys || [];
-
-        if (keys.length === 0) {
-            listEl.innerHTML = '';
-            if (emptyEl) emptyEl.classList.remove('hidden');
-            return;
-        }
-
-        if (emptyEl) emptyEl.classList.add('hidden');
-        listEl.innerHTML = keys.map(function (k) {
-            var expiry = k.expires_at
-                ? '<span class="text-xs text-gray-500 dark:text-gray-400">expires ' + formatEpochSeconds(k.expires_at) + '</span>'
-                : '<span class="text-xs text-gray-500 dark:text-gray-400">no expiry</span>';
-            var lastUsed = k.last_used_at
-                ? 'Last used ' + formatEpochSeconds(k.last_used_at)
-                : 'Never used';
-            return '<div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-md">' +
-                '<div>' +
-                    '<span class="text-sm font-medium">' + escapeHtml(k.label) + '</span>' +
-                    ' <code class="text-xs text-gray-500 dark:text-gray-400">' + escapeHtml(k.prefix) + '…</code>' +
-                    '<br>' + expiry + ' · <span class="text-xs text-gray-500 dark:text-gray-400">' + lastUsed + '</span>' +
-                '</div>' +
-                '<button onclick="revokeApiKey(\'' + escapeHtml(k.key_id) + '\')" ' +
-                    'class="text-sm text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 underline">Revoke</button>' +
-            '</div>';
-        }).join('');
-    } catch (e) {
-        listEl.innerHTML = '<p class="text-sm text-red-500">Error loading keys</p>';
-    }
-}
-
-// The key API returns Unix timestamps in SECONDS (Rust's `Utc::now().timestamp()`), but
-// the Date constructor takes MILLISECONDS. Passing the raw value renders every date as
-// January 1970, which looks like corrupt data rather than a unit mismatch.
-function formatEpochSeconds(epochSeconds) {
-    return new Date(epochSeconds * 1000).toLocaleDateString();
-}
-
-// Coerces null/undefined to an empty string. createTextNode(undefined) stringifies to the
-// literal word "undefined" and renders it as content, so a field this code names wrongly
-// shows up as plausible-looking text in the UI instead of visibly breaking.
-function escapeHtml(str) {
-    var div = document.createElement('div');
-    div.appendChild(document.createTextNode(str == null ? '' : String(str)));
-    return div.innerHTML;
-}
-
-// Load keys on page ready (only if authenticated — auth.js calls showAuthenticatedUI first)
-document.addEventListener('DOMContentLoaded', function () {
-    // Delay key load slightly so auth init has time to show the UI
-    setTimeout(function () {
-        if (window.krtk && window.krtk.isAuthenticated()) {
-            loadApiKeys();
-        }
-    }, 100);
-});
+//
+// Intentionally empty. The key panel is server-rendered htmx fragments: mint, list and
+// revoke are hx-post / hx-get / hx-delete attributes in index.html, the markup for a key
+// row lives in shared/templates/api_keys_list.html, and the Bearer token is attached by
+// the htmx:configRequest listener in auth.js like every other /api/* call.
+//
+// What used to be here -- fetch() calls, an innerHTML row builder, an escapeHtml helper and
+// an epoch-seconds date formatter -- were all consequences of rendering the panel in the
+// browser. Two of them had already produced defects (a field named `key_prefix` that the
+// API calls `prefix`, and seconds fed to a millisecond Date constructor). Rendering
+// server-side deletes the class of bug rather than the instances.
+//
+// The one remaining browser-only need, copying a freshly minted key, reuses
+// copyToClipboard() above -- the same helper the links table has always used.

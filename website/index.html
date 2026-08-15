@@ -150,56 +150,82 @@
 
                     </div>
 
-                    <!-- API Key Management (FR-5.7) -->
+                    <!-- API Key Management (FR-5.7)
+                         Driven by htmx exactly like the links table above: the server owns
+                         the markup for a key row and the browser swaps in fragments. There
+                         is no JavaScript behind this panel -- the two controls that need a
+                         browser API (clipboard, confirm) use the page's existing helper and
+                         htmx's own hx-confirm. -->
                     <div class="mt-10 border-t border-gray-200 dark:border-gray-700 pt-6">
                         <h3 class="text-xl font-semibold mb-4">API Keys</h3>
                         <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
                             API keys let you create and list links from scripts and CLI tools without a browser session.
                         </p>
 
-                        <!-- Mint new key form -->
-                        <div id="key-mint-form" class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                        <!-- Mint. The response is the new-key banner for #key-mint-result,
+                             plus an `HX-Trigger: key-minted` header. The list below is
+                             subscribed to that event, so the server decides that a mint also
+                             refreshes the list; this form does not have to know. The form is
+                             reset by the same event, which means a REJECTED mint (a bad
+                             expiry, the 10-key cap) keeps what you typed. -->
+                        <form id="key-mint-form"
+                              hx-post="/api/keys"
+                              hx-target="#key-mint-result"
+                              hx-swap="innerHTML"
+                              hx-indicator="#key-mint-loader"
+                              hx-on:key-minted="this.reset()"
+                              class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
                             <h4 class="text-sm font-medium mb-3">Create a new API key</h4>
                             <div class="flex gap-3 flex-wrap">
                                 <input type="text"
+                                       name="label"
                                        id="key-label-input"
                                        placeholder="Label (e.g. laptop CLI)"
                                        maxlength="64"
                                        required
                                        class="flex-1 min-w-[200px] px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <input type="number"
+                                       name="expires_in_days"
                                        id="key-expiry-input"
                                        placeholder="Expiry (days, optional)"
                                        min="1"
                                        max="365"
                                        class="w-48 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <button type="button"
+                                <button type="submit"
                                         id="key-mint-btn"
-                                        onclick="mintApiKey()"
                                         class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                     Create key
                                 </button>
                             </div>
+                        </form>
+
+                        <div id="key-mint-loader" class="htmx-indicator p-4">
+                          <div class="flex items-center space-x-3 bg-yellow-100 dark:bg-yellow-900/40 px-4 py-2 rounded-lg shadow-sm justify-center">
+                              <div class="spinner"></div>
+                              <span class="text-gray-600 dark:text-gray-300 font-medium">Creating key...</span>
+                          </div>
                         </div>
 
-                        <!-- Newly minted key display (shown once) -->
-                        <div id="key-mint-result" class="hidden mb-6 p-4 bg-green-100 dark:bg-green-900/40 border border-green-300 dark:border-green-700 rounded-lg">
-                            <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
-                                ⚠️ Copy this key now — it will not be shown again.
-                            </p>
-                            <code id="key-mint-value" class="block p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded text-sm font-mono break-all"></code>
-                            <button type="button"
-                                    onclick="copyApiKey()"
-                                    class="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline">
-                                Copy to clipboard
-                            </button>
-                        </div>
+                        <!-- The newly minted key is rendered here ONCE. Only its hash is
+                             stored, so no later fragment can show it again. -->
+                        <div id="key-mint-result" class="mb-6"></div>
 
-                        <!-- Key list -->
-                        <div id="key-list" class="space-y-2">
-                            <!-- Populated by loadApiKeys() -->
+                        <!-- The list renders its own empty state, so it is swapped whole.
+                             `key-minted from:body` catches the event the mint response
+                             triggers; a revoke targets this element directly. -->
+                        <div id="key-list"
+                             class="space-y-2"
+                             hx-get="/api/keys"
+                             hx-trigger="load, key-minted from:body"
+                             hx-swap="innerHTML"
+                             hx-indicator="#key-list-loader"></div>
+
+                        <div id="key-list-loader" class="htmx-indicator flex p-4">
+                          <div class="flex items-center space-x-3 bg-yellow-100 dark:bg-yellow-900/40 px-4 py-2 rounded-lg shadow-sm justify-center">
+                              <div class="spinner"></div>
+                              <span class="text-gray-600 dark:text-gray-300 font-medium">Loading keys...</span>
+                          </div>
                         </div>
-                        <p id="key-list-empty" class="hidden text-sm text-gray-500 dark:text-gray-400 italic">No API keys.</p>
                     </div>
                 </div><!-- /app-content -->
             </div>

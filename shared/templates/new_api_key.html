@@ -1,0 +1,19 @@
+{# The plaintext key appears in this fragment and nowhere else, ever again: only the
+   SHA-256 hash is stored, so the list fragment cannot re-render it. That is what makes
+   "shown once" (FR-5.7) a property of the data rather than a promise the UI keeps. #}
+<div class="p-4 bg-green-100 dark:bg-green-900/40 border border-green-300 dark:border-green-700 rounded-lg">
+  <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
+    ⚠️ Copy this key now — it will not be shown again.
+  </p>
+  <code class="block p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded text-sm font-mono break-all">{{ key }}</code>
+  <div class="flex items-center justify-between mt-2">
+    <button type="button"
+            onclick="copyToClipboard('{{ key }}')"
+            class="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline">
+        Copy to clipboard
+    </button>
+    <span class="text-xs text-gray-600 dark:text-gray-400">
+      {{ label }}{% if let Some(expires_at) = expires_at %} · expires {{ expires_at|format_timestamp }}{% else %} · no expiry{% endif %}
+    </span>
+  </div>
+</div>
