@@ -1,0 +1,20 @@
+[package]
+name = "manage_keys"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+shared = { path = "../../shared" }
+lambda_http = { workspace = true }
+tokio = { workspace = true }
+aws-config = { workspace = true }
+aws-sdk-dynamodb = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+base64 = { workspace = true }

@@ -1,8 +1,9 @@
 use lambda_http::http::StatusCode;
 use lambda_http::{run, service_fn, tracing, Error, IntoResponse, Request, RequestPayloadExt};
 
+use shared::auth::owner_from_request;
 use shared::core::{ShortenUrlRequest, UrlShortener};
-use shared::response::{empty_response, json_response, html_response};
+use shared::response::{empty_response, error_response, json_response, html_response};
 use shared::url_info::UrlInfo;
 use shared::templates::{NewShortLink, ErrorPopup, Template};
 
@@ -19,6 +20,17 @@ async fn function_handler(
     // Tracing
     tracing::info!("Received event: {:?}", event);
 
+    // Identity comes from the authorizer context, never from the request body. Accepting
+    // an owner from the payload would let any caller create links owned by anyone
+    // (FR-3.2, FR-3.6).
+    let owner_sub = match owner_from_request(&event) {
+        Ok(sub) => sub,
+        Err(e) => {
+            tracing::error!("rejecting create request without owner identity: {:?}", e);
+            return error_response(&e);
+        }
+    };
+
     // Get the Request
     let shorten_url_request_body = event.payload::<ShortenUrlRequest>()?;
 
@@ -31,7 +43,7 @@ async fn function_handler(
             match shorten_url_request.validate(&url_shortener.shortener_domain, secrets_client, secret_arn, &url_info.http_client).await {
                 Ok(ser) => {
                     let shortened_url_response = url_shortener
-                        .shorten_url(ser, url_info)
+                        .shorten_url(ser, url_info, &owner_sub)
                         .await;
 
                     // See if the request is coming from the front end HTMX

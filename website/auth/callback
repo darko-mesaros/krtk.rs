@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>krtk.rs - Signing in...</title>
+    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
+    <!-- Theme boot script: MUST run BEFORE Tailwind/HTMX to prevent flash of wrong theme.
+         Reads localStorage (survives sign-out which only clears sessionStorage).
+         This is its own copy because the callback is a separate document (FR-5.10). -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (stored === 'dark' || (stored === null && prefersDark)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {
+          // localStorage unavailable in restricted contexts; fail open to light theme
+        }
+      })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = { darkMode: 'class' };
+    </script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-full flex items-center justify-center">
+    <div class="text-center p-8">
+        <p class="text-lg text-gray-600 dark:text-gray-300">Signing in...</p>
+        <p id="error-msg" class="hidden mt-4 text-red-600 dark:text-red-400"></p>
+    </div>
+
+    <!-- Config must load before auth.js -->
+    <script src="/assets/auth-config.js"></script>
+    <script src="/assets/auth.js"></script>
+    <script>
+      (async function () {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var code = params.get('code');
+          var error = params.get('error');
+
+          if (error) {
+            throw new Error('Cognito error: ' + error + ' — ' + (params.get('error_description') || ''));
+          }
+
+          if (!code) {
+            throw new Error('No authorization code in callback URL');
+          }
+
+          await window.krtk.exchangeCodeForTokens(code);
+          // Success — redirect to main page
+          window.location.href = '/';
+        } catch (e) {
+          var errEl = document.getElementById('error-msg');
+          if (errEl) {
+            errEl.textContent = 'Authentication failed. Redirecting to login...';
+            errEl.classList.remove('hidden');
+          }
+          // Wait briefly so the user sees the message, then redirect to login
+          setTimeout(function () {
+            window.krtk.redirectToLogin();
+          }, 2000);
+        }
+      })();
+    </script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod core;
 pub mod error;
 pub mod response;
