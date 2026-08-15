@@ -27,6 +27,7 @@ function synthKrtkRsStack(): Template {
   const stack = new KrtkRsStack(app, 'TestKrtkRsStack', {
     env: TEST_ENV,
     certificateArn: certStack.certificate.certificateArn,
+    authCertificateArn: certStack.authCertificate.certificateArn,
     googleApiKeySecret: secretsStack.googleApiSecret,
     crossRegionReferences: true,
   });
@@ -43,7 +44,9 @@ describe('KrtkRsStack', () => {
 
   describe('DynamoDB link table', () => {
     test('creates exactly one table with LinkId as the partition key', () => {
-      template.resourceCountIs('AWS::DynamoDB::GlobalTable', 1);
+      // Two tables now: the link table and the API key table. Pinning the count keeps
+      // an accidental third table visible rather than silently deployed.
+      template.resourceCountIs('AWS::DynamoDB::GlobalTable', 2);
       template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
         KeySchema: [{ AttributeName: 'LinkId', KeyType: 'HASH' }],
       });
@@ -76,25 +79,46 @@ describe('KrtkRsStack', () => {
   });
 
   describe('Lambda functions', () => {
-    test('creates the four application functions on provided.al2023', () => {
+    test('creates the six application functions on provided.al2023', () => {
       // The stack also synthesizes CDK-managed helper functions (bucket
       // deployment, auto-delete-objects), so assert on the custom runtime
       // rather than a bare resourceCountIs over every function.
       const functions = template.findResources('AWS::Lambda::Function', {
         Properties: { Runtime: 'provided.al2023' },
       });
-      expect(Object.keys(functions)).toHaveLength(4);
+      // Six now: the four link functions plus the authorizer and manage_keys.
+      expect(Object.keys(functions)).toHaveLength(6);
     });
 
-    test('every application function receives TABLE_NAME and SHORTENER_DOMAIN', () => {
+    test('every LINK function receives TABLE_NAME and SHORTENER_DOMAIN', () => {
+      // Scoped to the link functions: the authorizer and manage_keys deliberately have
+      // no access to the link table, so asserting over every function would either fail
+      // or pressure someone into granting them access they should not have.
       const functions = template.findResources('AWS::Lambda::Function', {
         Properties: { Runtime: 'provided.al2023' },
       });
 
-      for (const fn of Object.values(functions)) {
+      const linkFunctions = Object.values(functions).filter(
+        (fn) => (fn as any).Properties.Environment.Variables.TABLE_NAME !== undefined,
+      );
+      expect(linkFunctions).toHaveLength(4);
+
+      for (const fn of linkFunctions) {
         const env = (fn as any).Properties.Environment.Variables;
-        expect(env).toHaveProperty('TABLE_NAME');
         expect(env.SHORTENER_DOMAIN).toBe('krtk.rs');
+      }
+    });
+
+    test('the auth functions get the key table and NOT the link table', () => {
+      const functions = template.findResources('AWS::Lambda::Function', {
+        Properties: { Runtime: 'provided.al2023' },
+      });
+      const authFunctions = Object.values(functions).filter(
+        (fn) => (fn as any).Properties.Environment.Variables.API_KEY_TABLE_NAME !== undefined,
+      );
+      expect(authFunctions).toHaveLength(2);
+      for (const fn of authFunctions) {
+        expect((fn as any).Properties.Environment.Variables.TABLE_NAME).toBeUndefined();
       }
     });
 
@@ -130,23 +154,106 @@ describe('KrtkRsStack', () => {
       });
     });
 
-    test('exposes exactly the three expected routes', () => {
+    test('exposes exactly the six expected routes', () => {
       const routes = template.findResources('AWS::ApiGatewayV2::Route');
       const routeKeys = Object.values(routes).map((r) => (r as any).Properties.RouteKey).sort();
       expect(routeKeys).toEqual([
+        'DELETE /api/keys/{keyId}',
+        'GET /api/keys',
         'GET /api/links',
         'GET /{linkId}',
+        'POST /api/keys',
         'POST /api/links',
       ]);
     });
 
-    test('configures CORS preflight for the browser client', () => {
+    /**
+     * The FR-4.4 security boundary, asserted structurally.
+     *
+     * /api/links uses the CUSTOM Lambda authorizer because it must accept a JWT or an
+     * API key. /api/keys uses the NATIVE user pool authorizer, which only understands
+     * JWTs -- that is what stops a leaked API key from minting its own replacements,
+     * and it holds without any handler-side conditional. If someone ever points both
+     * routes at one authorizer, this fails.
+     */
+    test('links accept either credential; key management is JWT-only', () => {
+      const authorizers = template.findResources('AWS::ApiGatewayV2::Authorizer');
+      const byType: Record<string, string> = {};
+      for (const [logicalId, a] of Object.entries(authorizers)) {
+        byType[logicalId] = (a as any).Properties.AuthorizerType;
+      }
+      expect(Object.values(byType).sort()).toEqual(['JWT', 'REQUEST']);
+
+      const jwtId = Object.keys(byType).find((k) => byType[k] === 'JWT')!;
+      const requestId = Object.keys(byType).find((k) => byType[k] === 'REQUEST')!;
+
+      const routes = template.findResources('AWS::ApiGatewayV2::Route');
+      for (const route of Object.values(routes)) {
+        const props = (route as any).Properties;
+        const key: string = props.RouteKey;
+        const refId = props.AuthorizerId?.Ref;
+
+        if (key.includes('/api/keys')) {
+          expect(refId).toBe(jwtId);
+        } else if (key.includes('/api/links')) {
+          expect(refId).toBe(requestId);
+        } else {
+          // The public redirect must carry no authorizer at all.
+          expect(props.AuthorizerId).toBeUndefined();
+          expect(props.AuthorizationType ?? 'NONE').toBe('NONE');
+        }
+      }
+    });
+
+    /**
+     * Zero cache is a requirement, not a default. Any TTL leaves a window in which a
+     * revoked API key still authorizes requests, but FR-4.6 says revocation takes
+     * effect on the next call.
+     */
+    test('the links authorizer does not cache its result', () => {
+      template.hasResourceProperties('AWS::ApiGatewayV2::Authorizer', {
+        AuthorizerType: 'REQUEST',
+        AuthorizerResultTtlInSeconds: 0,
+      });
+    });
+
+    /**
+     * Regression guard for the 401-before-invocation outage.
+     *
+     * Every declared identity source is REQUIRED by an HTTP API: a request missing any
+     * one of them is rejected with 401 before the authorizer Lambda is called. Declaring
+     * both Authorization and X-Api-Key therefore demanded both credentials at once and
+     * broke every real client, browser and script alike. The either/or contract of
+     * FR-4.3 only holds if the authorizer is always invoked, which means no identity
+     * sources at all -- so this asserts the absence, not a particular value.
+     */
+    test('the links authorizer declares no identity sources, so it always runs', () => {
+      const authorizers = template.findResources('AWS::ApiGatewayV2::Authorizer', {
+        Properties: { AuthorizerType: 'REQUEST' },
+      });
+      expect(Object.keys(authorizers)).toHaveLength(1);
+      const props = (Object.values(authorizers)[0] as any).Properties;
+      expect(props.IdentitySource ?? []).toEqual([]);
+    });
+
+    test('restricts CORS to the krtk.rs origin and allows the auth headers', () => {
       template.hasResourceProperties('AWS::ApiGatewayV2::Api', {
         CorsConfiguration: Match.objectLike({
           AllowMethods: Match.arrayWith(['GET', 'POST', 'OPTIONS']),
-          AllowHeaders: ['content-type'],
+          AllowHeaders: Match.arrayWith(['content-type', 'authorization', 'x-api-key']),
+          AllowOrigins: ['https://krtk.rs'],
         }),
       });
+    });
+
+    test('never allows a wildcard CORS origin', () => {
+      // Requests now carry credentials, so a wildcard origin would let any site read
+      // an authenticated response.
+      const apis = template.findResources('AWS::ApiGatewayV2::Api');
+      for (const api of Object.values(apis)) {
+        const origins = (api as any).Properties.CorsConfiguration?.AllowOrigins ?? [];
+        expect(origins).not.toContain('*');
+      }
     });
   });
 
@@ -181,7 +288,7 @@ describe('KrtkRsStack', () => {
       const distributions = template.findResources('AWS::CloudFront::Distribution');
       const config = (Object.values(distributions)[0] as any).Properties.DistributionConfig;
       const patterns = config.CacheBehaviors.map((b: any) => b.PathPattern).sort();
-      expect(patterns).toEqual(['/?*', '/api/*', '/assets/*', '/index.html', '/privacy', '/terms']);
+      expect(patterns).toEqual(['/?*', '/api/*', '/assets/*', '/auth/*', '/index.html', '/privacy', '/terms']);
     });
 
     // Regression guard for a live 404 on the apex. In a CloudFront path pattern '?'
@@ -230,8 +337,8 @@ describe('KrtkRsStack', () => {
       expect(redirectBehavior.RealtimeLogConfigArn).toBeDefined();
     });
 
-    test('forces text/html on the extensionless /terms and /privacy objects', () => {
-      template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 2);
+    test('forces text/html on the extensionless /terms, /privacy and callback objects', () => {
+      template.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 3);
       template.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
         ResponseHeadersPolicyConfig: Match.objectLike({
           CustomHeadersConfig: {
@@ -396,7 +503,8 @@ describe('KrtkRsStack', () => {
       const functions = template.findResources('AWS::Lambda::Function', {
         Properties: { Runtime: 'provided.al2023' },
       });
-      expect(Object.keys(functions)).toHaveLength(4);
+      // Six now: the four link functions plus the authorizer and manage_keys.
+      expect(Object.keys(functions)).toHaveLength(6);
       for (const fn of Object.values(functions)) {
         expect((fn as any).Properties.Architectures).toEqual(['arm64']);
       }
@@ -466,21 +574,218 @@ describe('KrtkRsStack', () => {
       });
     });
   });
+
+  describe('Cognito user pool', () => {
+    test('requires MFA with TOTP only, never SMS', () => {
+      // SMS MFA is phishable, costs money per message, and adds a delivery dependency
+      // to every login. Asserting its absence keeps a console-side "convenience" change
+      // from silently weakening 2FA.
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        MfaConfiguration: 'ON',
+        EnabledMfas: ['SOFTWARE_TOKEN_MFA'],
+      });
+    });
+
+    test('disables self-registration at the pool level, not just in the UI', () => {
+      // This is what makes the sign-up API itself refuse, rather than merely hiding a
+      // link on the hosted page.
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        AdminCreateUserConfig: Match.objectLike({
+          AllowAdminCreateUserOnly: true,
+        }),
+      });
+    });
+
+    test('enables deletion protection, since a pool has no point-in-time recovery', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        DeletionProtection: 'ACTIVE',
+      });
+    });
+
+    test('uses the Essentials feature plan, not Plus', () => {
+      // Essentials is required for refresh token rotation and managed login, and is free
+      // up to 10k MAU. Plus has NO free tier and bills from the first user while adding
+      // only threat protection this project does not use.
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        UserPoolTier: 'ESSENTIALS',
+      });
+    });
+
+    test('signs in by email', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPool', {
+        UsernameAttributes: Match.arrayWith(['email']),
+      });
+    });
+
+    /**
+     * Regression guard for a live outage.
+     *
+     * The domain uses managed login version 2, which renders its pages FROM a branding
+     * style. A pool on MLV 2 with no ManagedLoginBranding resource serves "Login pages
+     * unavailable -- Please contact an administrator" instead of a login form, while the
+     * domain still reports ACTIVE and the certificate validates -- so it reads as a
+     * propagation delay rather than a missing resource. Shipping MLV 2 without branding
+     * is a broken login page, not a cosmetic gap.
+     */
+    test('managed login v2 has the branding resource it requires', () => {
+      const domains = template.findResources('AWS::Cognito::UserPoolDomain');
+      const usesV2 = Object.values(domains).some(
+        (d) => (d as any).Properties.ManagedLoginVersion === 2,
+      );
+
+      if (usesV2) {
+        template.resourceCountIs('AWS::Cognito::ManagedLoginBranding', 1);
+        template.hasResourceProperties('AWS::Cognito::ManagedLoginBranding', {
+          UseCognitoProvidedValues: true,
+        });
+      }
+    });
+  });
+
+  describe('Cognito app client', () => {
+    test('is a public client with no secret', () => {
+      // A browser cannot keep a secret; PKCE is the protection instead.
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        GenerateSecret: false,
+      });
+    });
+
+    test('allows the authorization code flow and NOT the implicit flow', () => {
+      // Implicit would put tokens in the URL fragment, where they reach history and
+      // referrer headers.
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        AllowedOAuthFlows: ['code'],
+      });
+
+      const clients = template.findResources('AWS::Cognito::UserPoolClient');
+      for (const client of Object.values(clients)) {
+        expect(client.Properties.AllowedOAuthFlows).not.toContain('implicit');
+      }
+    });
+
+    test('restricts callback and logout URLs to the krtk.rs origin', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        CallbackURLs: ['https://krtk.rs/auth/callback'],
+        LogoutURLs: ['https://krtk.rs/'],
+      });
+    });
+
+    test('issues short-lived access tokens with revocation enabled', () => {
+      template.hasResourceProperties('AWS::Cognito::UserPoolClient', {
+        AccessTokenValidity: 60,
+        IdTokenValidity: 60,
+        RefreshTokenValidity: 43200,
+        TokenValidityUnits: Match.objectLike({ AccessToken: 'minutes' }),
+        EnableTokenRevocation: true,
+      });
+    });
+  });
+
+  describe('API key table', () => {
+    test('is keyed on the key hash, so verification is a GetItem and never a scan', () => {
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+        KeySchema: [{ AttributeName: 'KeyHash', KeyType: 'HASH' }],
+      });
+    });
+
+    test('indexes keys by owner for listing and the per-user cap', () => {
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+        KeySchema: [{ AttributeName: 'KeyHash', KeyType: 'HASH' }],
+        GlobalSecondaryIndexes: Match.arrayWith([
+          Match.objectLike({
+            IndexName: 'OwnerIndex',
+            KeySchema: [
+              { AttributeName: 'OwnerId', KeyType: 'HASH' },
+              { AttributeName: 'CreatedAt', KeyType: 'RANGE' },
+            ],
+          }),
+        ]),
+      });
+    });
+
+    /**
+     * Deliberately asymmetric with linkTable, which DOES have PITR.
+     *
+     * Restoring a credential store resurrects revoked keys: revoke a leaked key today,
+     * restore yesterday's snapshot, and the leaked credential works again with no
+     * signal. Link data is the opposite — a restore there is pure recovery. This test
+     * exists so the inconsistency cannot be "tidied up" without reading why.
+     */
+    test('has point-in-time recovery OFF, so a restore cannot revive revoked keys', () => {
+      const tables = template.findResources('AWS::DynamoDB::GlobalTable');
+      const keyTable = Object.values(tables).find(
+        (t) => t.Properties?.KeySchema?.[0]?.AttributeName === 'KeyHash',
+      );
+
+      expect(keyTable).toBeDefined();
+
+      const replicas = keyTable!.Properties.Replicas ?? [];
+      for (const replica of replicas) {
+        const pitr = replica.PointInTimeRecoverySpecification;
+        expect(pitr?.PointInTimeRecoveryEnabled ?? false).toBe(false);
+      }
+    });
+
+    test('is retained and deletion-protected, since losing it breaks every CLI', () => {
+      const tables = template.findResources('AWS::DynamoDB::GlobalTable');
+      const keyTable = Object.entries(tables).find(
+        ([, t]) => t.Properties?.KeySchema?.[0]?.AttributeName === 'KeyHash',
+      );
+
+      expect(keyTable).toBeDefined();
+      expect(keyTable![1].DeletionPolicy).toBe('Retain');
+
+      // On GlobalTable (TableV2) both deletion protection and PITR are per-replica
+      // properties, not top-level ones.
+      const replicas = keyTable![1].Properties.Replicas ?? [];
+      expect(replicas.length).toBeGreaterThan(0);
+      for (const replica of replicas) {
+        expect(replica.DeletionProtectionEnabled).toBe(true);
+      }
+    });
+
+    test('expires keys via TTL for cleanup only', () => {
+      // Rejection is enforced in code against ExpiresAt. TTL deletion can lag by days,
+      // so it is a janitor, never the gate.
+      template.hasResourceProperties('AWS::DynamoDB::GlobalTable', {
+        KeySchema: [{ AttributeName: 'KeyHash', KeyType: 'HASH' }],
+        TimeToLiveSpecification: { AttributeName: 'ExpiresAt', Enabled: true },
+      });
+    });
+  });
 });
 
 describe('CertificateStack', () => {
-  test('issues a DNS-validated certificate for krtk.rs', () => {
+  test('issues DNS-validated certificates for krtk.rs and the auth domain', () => {
     const app = new cdk.App();
     const stack = new CertificateStack(app, 'TestCertificateStack', {
       env: { ...TEST_ENV, region: 'us-east-1' },
     });
     const template = Template.fromStack(stack);
 
-    template.resourceCountIs('AWS::CertificateManager::Certificate', 1);
+    template.resourceCountIs('AWS::CertificateManager::Certificate', 2);
     template.hasResourceProperties('AWS::CertificateManager::Certificate', {
       DomainName: 'krtk.rs',
       ValidationMethod: 'DNS',
     });
+    template.hasResourceProperties('AWS::CertificateManager::Certificate', {
+      DomainName: 'auth.krtk.rs',
+      ValidationMethod: 'DNS',
+    });
+  });
+
+  /**
+   * Cognito requires a custom-domain certificate in us-east-1 regardless of the user
+   * pool's own region. This stack is the only us-east-1 stack in the app, which is why
+   * the auth cert lives here rather than beside the pool in us-west-2.
+   */
+  test('is pinned to us-east-1, which Cognito requires for a custom domain cert', () => {
+    const app = new cdk.App();
+    const stack = new CertificateStack(app, 'TestCertificateStack', {
+      env: { ...TEST_ENV, region: 'us-east-1' },
+    });
+
+    expect(stack.region).toBe('us-east-1');
   });
 });
 

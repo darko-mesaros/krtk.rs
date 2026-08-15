@@ -7,6 +7,9 @@ members = [
   "lambda/get_links",
   "lambda/visit_link",
   "lambda/process_analytics",
+  "lambda/authorizer",
+  "lambda/manage_keys",
+  "tools/migrate_owners",
 ]
 
 [workspace.dependencies]
@@ -32,3 +35,12 @@ thiserror = "2"
 serde_dynamo = { version = "4", features = ["aws-sdk-dynamodb+1"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Auth: JWT verification against the Cognito pool JWKS.
+jsonwebtoken = "9"
+# API keys: SHA-256 hashing (keys are stored only as hashes) and CSPRNG generation.
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.9"
+base64 = "0.22"
+# CLI args for the one-off migration tool.
+clap = { version = "4", features = ["derive"] }

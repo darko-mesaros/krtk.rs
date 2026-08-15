@@ -14,8 +14,25 @@ use crate::url_info::UrlInfo;
 use crate::safe_browsing::is_url_safe;
 use crate::error::AppError;
 
-const SORT_KEY_VALUE: &str = "LINKS";  // Use same value in query and ExclusiveStartKey
 const URL_LENGTH: u16 = 7;  // The lenght of the shortened URL for CUID2 to generate
+
+/// Builds the value stored in the `SortKey` attribute, which is the **partition key of
+/// the `TimeStampIndex` GSI** — not a sort key, despite the attribute's name.
+///
+/// The name predates per-user ownership. Before authentication every item carried the
+/// literal `"LINKS"`, so the GSI had exactly one partition and `list_urls` could query
+/// it for "all links". Ownership reuses that same attribute to partition per user, which
+/// turns the existing index into a per-owner index with no new GSI and removes what was
+/// a single hot partition.
+///
+/// Renaming the attribute would mean rewriting every item, and renaming the index would
+/// mean building a second one and cutting over — both larger migrations than the feature
+/// that motivated them. See design.md §2.2.
+///
+/// Every producer of this value goes through here so no call site hand-assembles it.
+pub fn owner_key(owner_sub: &str) -> String {
+    format!("USER#{owner_sub}")
+}
 
 #[derive(Deserialize)]
 pub struct ShortenUrlRequest {
@@ -110,6 +127,20 @@ struct ShortUrlRow {
     image: Option<String>,
     #[serde(rename = "TimeStamp")]
     timestamp: i64,
+    /// Cognito `sub` of the owner.
+    ///
+    /// `Option` because rows written before authentication existed have no `OwnerId`,
+    /// and they must still deserialize rather than being silently discarded — the old
+    /// `TryFrom` behaviour of dropping unconvertible items is exactly how an ownership
+    /// bug would present as links vanishing from the list. FR-7.6 defines such a link
+    /// as publicly resolvable but never listed.
+    ///
+    /// Deliberately absent from `ShortUrl`: ownership is persistence-only and never
+    /// appears on the wire (FR-3.1a), so the JSON response is byte-identical to
+    /// pre-auth output.
+    #[serde(rename = "OwnerId")]
+    #[allow(dead_code)] // Read via the query partition, not per-item; kept for integrity checks.
+    owner_id: Option<String>,
 }
 
 impl From<ShortUrlRow> for ShortUrl {
@@ -144,11 +175,17 @@ impl UrlShortener {
         }
     }
 
-    // Only passing UrlInfo (and the HTTP client when I need to)
+    /// Creates a short link owned by `owner_sub`.
+    ///
+    /// The owner is a required parameter rather than an `Option` so that an unowned
+    /// write is a compile error, not a runtime branch. It is always derived from a
+    /// verified credential by the caller (see `owner_from_request`) and never from
+    /// request-supplied data — FR-3.2.
     pub async fn shorten_url(
         &self,
         req: ShortenUrlRequest,
         url_info: &UrlInfo,
+        owner_sub: &str,
     ) -> Result<ShortUrl, AppError> {
 
         // Normalize the URL before:
@@ -167,8 +204,11 @@ impl UrlShortener {
             .dynamodb_client
             .put_item() // Put single item
             .table_name(&self.dynamodb_urls_table) // Table name is from the Struct
-            .item("SortKey".to_string(), AttributeValue::S(SORT_KEY_VALUE.to_string())) // Adding the sort
-                                                                                 // key
+            // GSI partition key -- per-owner, see `owner_key`.
+            .item("SortKey".to_string(), AttributeValue::S(owner_key(owner_sub)))
+            // Authoritative ownership field. Stored alongside `SortKey` so answering
+            // "who owns this" never requires parsing a composite key.
+            .item("OwnerId", AttributeValue::S(owner_sub.to_string()))
             .item("LinkId", AttributeValue::S(short_url.clone())) // Putting item "LinkId" as
             // String
             .item(
@@ -295,11 +335,21 @@ impl UrlShortener {
         }
     }
 
+    /// Lists the links owned by `owner_sub`, newest first.
+    ///
+    /// Scoping is enforced by the query itself: the `TimeStampIndex` partition key is
+    /// the owner key, so another user's items are not merely filtered out — they are
+    /// in a different partition and are never read. There is no code path that returns
+    /// a link the caller does not own, and pagination cost is unaffected by how many
+    /// links other users hold (FR-3.3).
     pub async fn list_urls(
         &self,
+        owner_sub: &str,
         last_evaluated_id: Option<&str>,
         last_evaluated_timestamp: Option<&str>,
     ) -> Result<ListShortUrlResponse, AppError> {
+        let partition = owner_key(owner_sub);
+
         // Run a scan on 25 items, but make it mutable as we may do something in a bit.
         let mut query = self
             .dynamodb_client
@@ -309,7 +359,7 @@ impl UrlShortener {
             .expression_attribute_names("#pk", "SortKey")
             .expression_attribute_values(
                 ":pk",
-                AttributeValue::S(SORT_KEY_VALUE.to_string())
+                AttributeValue::S(partition.clone())
             )
             .table_name(&self.dynamodb_urls_table)
             .scan_index_forward(false)
@@ -319,7 +369,8 @@ impl UrlShortener {
         // exclusive_start_key() with a value of the last_evaluated_id
         if let (Some(lei), Some(letime)) = (last_evaluated_id, last_evaluated_timestamp) {
             let mut exclusive_start_key = HashMap::new();
-            exclusive_start_key.insert("SortKey".to_string(), AttributeValue::S(SORT_KEY_VALUE.to_string()));
+            // Must match the queried partition exactly, or DynamoDB rejects the key.
+            exclusive_start_key.insert("SortKey".to_string(), AttributeValue::S(partition.clone()));
             exclusive_start_key.insert("LinkId".to_string(), AttributeValue::S(lei.to_string()));
             exclusive_start_key.insert("TimeStamp".to_string(), AttributeValue::N(letime.to_string()));
             query = query.set_exclusive_start_key(Some(exclusive_start_key));
@@ -407,11 +458,15 @@ impl UrlShortener {
 mod tests {
     use super::*;
 
+    const TEST_SUB: &str = "cognito-sub-123";
+
     /// Builds the exact item shape `shorten_url` writes to DynamoDB, so these tests fail
-    /// if the writer and the `#[serde(rename)]` attributes on `ShortUrl` ever drift apart.
+    /// if the writer and the `#[serde(rename)]` attributes on `ShortUrlRow` ever drift
+    /// apart.
     fn stored_item(with_optionals: bool) -> HashMap<String, AttributeValue> {
         let mut item = HashMap::new();
-        item.insert("SortKey".into(), AttributeValue::S(SORT_KEY_VALUE.into()));
+        item.insert("SortKey".into(), AttributeValue::S(owner_key(TEST_SUB)));
+        item.insert("OwnerId".into(), AttributeValue::S(TEST_SUB.into()));
         item.insert("LinkId".into(), AttributeValue::S("abc1234".into()));
         item.insert("OriginalLink".into(), AttributeValue::S("https://example.com/".into()));
         item.insert("Clicks".into(), AttributeValue::N("42".into()));
@@ -423,6 +478,18 @@ mod tests {
             item.insert("Image".into(), AttributeValue::S("https://example.com/og.png".into()));
         }
         item
+    }
+
+    #[test]
+    fn owner_key_has_the_expected_prefix() {
+        assert_eq!(owner_key("abc-123"), "USER#abc-123");
+    }
+
+    /// Two owners must land in different GSI partitions, which is what makes listing
+    /// scoped by the query rather than by a filter.
+    #[test]
+    fn owner_keys_are_distinct_per_owner() {
+        assert_ne!(owner_key("owner-a"), owner_key("owner-b"));
     }
 
     #[test]
@@ -456,11 +523,37 @@ mod tests {
     }
 
     #[test]
-    fn ignores_unknown_attributes_so_new_columns_do_not_break_reads() {
-        // The auth spec adds OwnerId to this table. Reads must tolerate attributes the
-        // struct does not know about, or deploying the writer first would break listing.
+    fn deserializes_owner_id_when_present() {
+        let url: ShortUrlRow = serde_dynamo::from_item(stored_item(true))
+            .expect("a migrated item must deserialize");
+        assert_eq!(url.owner_id.as_deref(), Some(TEST_SUB));
+    }
+
+    /// Rows written before authentication existed carry no `OwnerId`. They MUST still
+    /// deserialize: FR-7.6 defines such a link as publicly resolvable but never listed,
+    /// and the old behaviour of discarding unconvertible items is precisely how an
+    /// ownership bug would present as links silently vanishing.
+    #[test]
+    fn deserializes_a_pre_migration_item_with_no_owner() {
         let mut item = stored_item(true);
-        item.insert("OwnerId".into(), AttributeValue::S("cognito-sub-123".into()));
+        item.remove("OwnerId");
+        item.insert("SortKey".into(), AttributeValue::S("LINKS".into())); // legacy value
+
+        let url: ShortUrlRow = serde_dynamo::from_item(item)
+            .expect("a pre-migration item must still deserialize");
+        assert_eq!(url.link_id, "abc1234");
+        assert!(
+            url.owner_id.is_none(),
+            "an unmigrated row must read back as unowned, not fail"
+        );
+    }
+
+    #[test]
+    fn ignores_unknown_attributes_so_new_columns_do_not_break_reads() {
+        // Reads must tolerate attributes the struct does not know about, so a writer
+        // deployed ahead of a reader cannot break listing.
+        let mut item = stored_item(true);
+        item.insert("SomeFutureColumn".into(), AttributeValue::S("whatever".into()));
 
         let url: ShortUrlRow = serde_dynamo::from_item(item)
             .expect("an unknown attribute must not fail deserialization");

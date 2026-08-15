@@ -25,6 +25,7 @@ const krtkStack = new KrtkRsStack(app, 'KrtkRsStack', {
     region: 'us-west-2'
   },
   certificateArn: certStack.certificate.certificateArn,
+  authCertificateArn: certStack.authCertificate.certificateArn,
   googleApiKeySecret: secretsStack.googleApiSecret,
   crossRegionReferences: true,
 });

@@ -1,8 +1,9 @@
 use lambda_http::http::StatusCode;
 use lambda_http::{run, service_fn, tracing, Error, IntoResponse, Request, RequestExt};
 
+use shared::auth::owner_from_request;
 use shared::core::UrlShortener;
-use shared::response::{empty_response, json_response, html_response};
+use shared::response::{empty_response, error_response, json_response, html_response};
 use shared::templates::{LinksTable, Link, Template};
 
 use std::env;
@@ -15,14 +16,28 @@ async fn function_handler(
     // Tracing
     tracing::info!("Received event: {:?}", event);
 
+    // Identity comes from the authorizer context, never from the request itself.
+    // Behind a configured authorizer this cannot fail; if it does, the route is
+    // misconfigured and failing closed is the only safe answer.
+    let owner_sub = match owner_from_request(&event) {
+        Ok(sub) => sub,
+        Err(e) => {
+            tracing::error!("rejecting list request without owner identity: {:?}", e);
+            return error_response(&e);
+        }
+    };
+
     // Get the query parameters from the event
     let query_params = event.query_string_parameters();
     // Search for last_evaluated_id and store it into the var
     let last_evaluated_id = query_params.first("last_evaluated_id");
     let last_evaluated_timestamp = query_params.first("last_evaluated_timestamp");
 
-    // Get all the links
-    let links = url_shortener.list_urls(last_evaluated_id, last_evaluated_timestamp).await;
+    // Only this owner's links. Scoping is in the query's partition key, so another
+    // owner's items are never read rather than being read and filtered.
+    let links = url_shortener
+        .list_urls(&owner_sub, last_evaluated_id, last_evaluated_timestamp)
+        .await;
 
     // See if the request is coming from the front end HTMX
     let htmx_request = event.headers().get("Hx-Request");

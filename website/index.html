@@ -6,8 +6,30 @@
     <title>krtk.rs - URL Shortener</title>
     <link rel="icon" type="image/x-icon" href="assets/favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Apply the saved/preferred theme as early as possible to avoid a flash of the wrong theme.
+         This MUST sit ABOVE the Tailwind and HTMX script tags and run synchronously before first paint.
+         Moving it into main.js looks tidier and silently reintroduces a flash of the wrong theme. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (stored === 'dark' || (stored === null && prefersDark)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {
+          // localStorage may be unavailable; fail open to light theme
+        }
+      })();
+    </script>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind Play CDN config: enable the 'class' dark mode strategy required for a manual toggle -->
+    <script>
+      tailwind.config = { darkMode: 'class' };
+    </script>
     <style>
       .htmx-indicator{
         display: none;
@@ -20,12 +42,16 @@
       }
       .spinner {
         border: 4px solid #f3f3f3;
-        /* border-top: 4px solid #3498db;*/
         border-top: 4px solid #008000;
         border-radius: 50%;
         width: 20px;
         height: 20px;
         animation: spin 1s linear infinite;
+      }
+      /* In dark mode, soften the light-gray base ring so it doesn't glare; keep the green (#008000) brand accent on top */
+      .dark .spinner {
+        border: 4px solid #4b5563;
+        border-top: 4px solid #008000;
       }
       @keyframes spin {
         0% { transform: rotate(0deg);}
@@ -33,77 +59,154 @@
       }
     </style>
 </head>
-<body class="bg-gray-50 min-h-full flex flex-col">
+<body class="bg-gray-50 dark:bg-gray-900 min-h-full flex flex-col">
     <main class="flex-grow">
         <div class="max-w-6xl mx-auto p-6">
-            <div class="bg-white rounded-lg shadow-sm p-6">
-                <div class="flex items-center justify-center gap-5 mb-6">
+            <div class="bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg shadow-sm p-6">
+                <!-- Header: logo, title, user info, theme toggle -->
+                <div class="flex items-center justify-center gap-5 mb-6 relative px-12">
                     <img src="/assets/logo.png" alt="krtk.rs logo" class="w-16 h-16">
                     <h1 class="text-3xl font-bold m-0">krtk.rs</h1>
+                    <!-- Theme toggle (FR-9.3) -->
+                    <button type="button"
+                            id="theme-toggle"
+                            aria-label="Toggle dark mode"
+                            aria-pressed="false"
+                            title="Toggle dark mode"
+                            class="absolute right-0 inline-flex items-center justify-center w-10 h-10 rounded-full border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <i class="fas fa-sun dark:hidden"></i>
+                        <i class="fas fa-moon hidden dark:inline"></i>
+                    </button>
                 </div>
 
-                <form id="shorten-form"
-                      hx-post="/api/links"
-                      hx-trigger="submit"
-                      hx-swap="innerHtml"
-                      hx-target="#result"
-                      hx-indicator="#table-loader"
-                      hx-on::after-request="if(event.detail.successful) {
-                        this.reset();
-                        htmx.trigger('#link-list', 'refreshLinks')
-                      }">
-                    <div class="flex gap-3 mb-6">
-                        <input type="text"
-                               id="url_input"
-                               name="url_to_shorten"
-                               placeholder="Enter URL to shorten"
-                               required
-                               class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <button type="submit" 
-                                id="submit-btn"
-                                class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
-                            Shorten
-                        </button>
-                    </div>
-                </form>
-
-                <div id="table-loader" class="htmx-indicator p-4">
-                  <div class="flex items-center space-x-3 bg-yellow-100 px-4 py-2 rounded-lg shadow-sm justify-center">
-                      <div class="spinner"></div>
-                      <span class="text-gray-600 font-medium">Shortening link...</span>
-                  </div>
+                <!-- Signed-in user bar (hidden until auth confirms session) -->
+                <div id="user-info" class="hidden flex items-center justify-between mb-6 px-2 py-2 bg-gray-100 dark:bg-gray-700 rounded-md">
+                    <span class="text-sm text-gray-700 dark:text-gray-300">
+                        Signed in as <strong id="user-email" class="text-gray-900 dark:text-gray-100"></strong>
+                    </span>
+                    <button onclick="window.krtk.signOut()"
+                            class="text-sm px-3 py-1 text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 border border-red-300 dark:border-red-600 rounded-md hover:bg-red-50 dark:hover:bg-red-900/30 focus:outline-none focus:ring-2 focus:ring-red-500">
+                        Sign out
+                    </button>
                 </div>
-                <div id="result" class="mb-6"></div>
 
-                <!-- All shortened URLs -->
-                <h3 class="text-xl font-semibold mb-4">Shortened links</h3>
-                <div id="link-list" hx-get="/api/links" hx-trigger="load, refreshLinks" hx-target="#linksTable" hx-indicator="#table-rows-loader">
-                    <table class="w-full">
-                        <thead>
-                            <tr class="border-b">
-                                <th class="py-3 px-4 text-left bg-gray-50">Timestamp</th>
-                                <th class="py-3 px-4 text-left bg-gray-50">Title</th>
-                                <th class="py-3 px-4 text-left bg-gray-50 w-48">Short Link</th>
-                                <th class="py-3 px-4 text-left bg-gray-50">Clicks</th>
-                            </tr>
-                        </thead>
-                        <tbody id="linksTable" class="divide-y">
-                        </tbody>
-                    </table>
+                <!-- App content: hidden until authenticated (FR-5.1 — no shortening UI shown to unauthenticated) -->
+                <div id="app-content" class="hidden">
+                    <form id="shorten-form"
+                          hx-post="/api/links"
+                          hx-trigger="submit"
+                          hx-swap="innerHtml"
+                          hx-target="#result"
+                          hx-indicator="#table-loader"
+                          hx-on::after-request="if(event.detail.successful) {
+                            this.reset();
+                            htmx.trigger('#link-list', 'refreshLinks')
+                          }">
+                        <div class="flex gap-3 mb-6">
+                            <input type="text"
+                                   id="url_input"
+                                   name="url_to_shorten"
+                                   placeholder="Enter URL to shorten"
+                                   required
+                                   class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="submit"
+                                    id="submit-btn"
+                                    class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                                Shorten
+                            </button>
+                        </div>
+                    </form>
 
-                    <div id="table-rows-loader" class="htmx-indicator flex p-4">
-                      <div class="flex items-center space-x-3 bg-yellow-100 px-4 py-2 rounded-lg shadow-sm justify-center">
+                    <div id="table-loader" class="htmx-indicator p-4">
+                      <div class="flex items-center space-x-3 bg-yellow-100 dark:bg-yellow-900/40 px-4 py-2 rounded-lg shadow-sm justify-center">
                           <div class="spinner"></div>
-                          <span class="text-gray-600 font-medium">Loading links...</span>
+                          <span class="text-gray-600 dark:text-gray-300 font-medium">Shortening link...</span>
                       </div>
                     </div>
+                    <div id="result" class="mb-6"></div>
 
-                </div>
+                    <!-- All shortened URLs -->
+                    <h3 class="text-xl font-semibold mb-4">Shortened links</h3>
+                    <div id="link-list" hx-get="/api/links" hx-trigger="load, refreshLinks" hx-target="#linksTable" hx-indicator="#table-rows-loader">
+                        <table class="w-full">
+                            <thead>
+                                <tr class="border-b dark:border-gray-700">
+                                    <th class="py-3 px-4 text-left bg-gray-50 dark:bg-gray-700 dark:text-gray-100">Timestamp</th>
+                                    <th class="py-3 px-4 text-left bg-gray-50 dark:bg-gray-700 dark:text-gray-100">Title</th>
+                                    <th class="py-3 px-4 text-left bg-gray-50 dark:bg-gray-700 dark:text-gray-100 w-48">Short Link</th>
+                                    <th class="py-3 px-4 text-left bg-gray-50 dark:bg-gray-700 dark:text-gray-100">Clicks</th>
+                                </tr>
+                            </thead>
+                            <tbody id="linksTable" class="divide-y dark:divide-gray-700">
+                            </tbody>
+                        </table>
+
+                        <div id="table-rows-loader" class="htmx-indicator flex p-4">
+                          <div class="flex items-center space-x-3 bg-yellow-100 dark:bg-yellow-900/40 px-4 py-2 rounded-lg shadow-sm justify-center">
+                              <div class="spinner"></div>
+                              <span class="text-gray-600 dark:text-gray-300 font-medium">Loading links...</span>
+                          </div>
+                        </div>
+
+                    </div>
+
+                    <!-- API Key Management (FR-5.7) -->
+                    <div class="mt-10 border-t border-gray-200 dark:border-gray-700 pt-6">
+                        <h3 class="text-xl font-semibold mb-4">API Keys</h3>
+                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                            API keys let you create and list links from scripts and CLI tools without a browser session.
+                        </p>
+
+                        <!-- Mint new key form -->
+                        <div id="key-mint-form" class="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <h4 class="text-sm font-medium mb-3">Create a new API key</h4>
+                            <div class="flex gap-3 flex-wrap">
+                                <input type="text"
+                                       id="key-label-input"
+                                       placeholder="Label (e.g. laptop CLI)"
+                                       maxlength="64"
+                                       required
+                                       class="flex-1 min-w-[200px] px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <input type="number"
+                                       id="key-expiry-input"
+                                       placeholder="Expiry (days, optional)"
+                                       min="1"
+                                       max="365"
+                                       class="w-48 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <button type="button"
+                                        id="key-mint-btn"
+                                        onclick="mintApiKey()"
+                                        class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    Create key
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Newly minted key display (shown once) -->
+                        <div id="key-mint-result" class="hidden mb-6 p-4 bg-green-100 dark:bg-green-900/40 border border-green-300 dark:border-green-700 rounded-lg">
+                            <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">
+                                ⚠️ Copy this key now — it will not be shown again.
+                            </p>
+                            <code id="key-mint-value" class="block p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded text-sm font-mono break-all"></code>
+                            <button type="button"
+                                    onclick="copyApiKey()"
+                                    class="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline">
+                                Copy to clipboard
+                            </button>
+                        </div>
+
+                        <!-- Key list -->
+                        <div id="key-list" class="space-y-2">
+                            <!-- Populated by loadApiKeys() -->
+                        </div>
+                        <p id="key-list-empty" class="hidden text-sm text-gray-500 dark:text-gray-400 italic">No API keys.</p>
+                    </div>
+                </div><!-- /app-content -->
             </div>
         </div>
     </main>
-    <footer class="py-6 mt-8 border-t border-gray-200">
-        <div class="max-w-3xl mx-auto px-6 text-center text-gray-600">
+    <footer class="py-6 mt-8 border-t border-gray-200 dark:border-gray-700">
+        <div class="max-w-3xl mx-auto px-6 text-center text-gray-600 dark:text-gray-400">
             <p class="text-sm">
                 ❤️ Powered by 
                 <a href="https://aws.amazon.com/cdk/">AWS CDK</a>, 
@@ -113,12 +216,20 @@
                 <a href="/terms">Terms of Service</a> |
                 <a href="/privacy">Privacy Policy</a>
                 </br>
-                Cobbled together by <a href="https://github.com/darko-mesaros" class="text-blue-600 hover:text-blue-800">Darko</a>
+                Cobbled together by <a href="https://github.com/darko-mesaros" class="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Darko</a>
             </p>
             <p class="text-xs">Version: v0.0.5 ALPHA</p>
         </div>
     </footer>
 
+    <!-- Config must load before auth.js -->
+    <script src="/assets/auth-config.js"></script>
+    <script src="/assets/auth.js"></script>
     <script src="/assets/main.js"></script>
+    <script>
+      // Initialize auth gate — redirects to Cognito if unauthenticated,
+      // shows UI if session exists. No shortening UI renders before this resolves.
+      window.krtk.initAuth();
+    </script>
 </body>
 </html>
