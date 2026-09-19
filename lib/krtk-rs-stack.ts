@@ -709,7 +709,7 @@ export class KrtkRsStack extends cdk.Stack {
       evaluationPeriods: 1,
       comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: TreatMissingData.NOT_BREACHING,
-      alarmDescription: 'Alarm when too many invalid URLs are processed'
+      alarmDescription: 'Alarm when process_analytics logs too many unexpected increment failures (warn). Valid-shaped but deleted links are skipped at debug and do not count; a warn now means an unexpected data store error.'
     });
 
     // Outputs

@@ -44,20 +44,31 @@ pub struct LogRecord {
     pub c_country: Option<String>,
 }
 
+/// The exact length of a generated short-link id: cuid2 built with
+/// `CuidConstructor::new().with_length(7)` in `shared::core` (URL_LENGTH = 7).
+const SHORT_LINK_LEN: usize = 7;
+
 /// Returns `Some(link_id)` if and only if this record is a countable short-link
 /// click, else `None`.
 ///
 /// A record counts when ALL hold (FR-4.2):
 ///   - method is GET (a HEAD or OPTIONS to a short link is not a click),
 ///   - status is 302 (the redirect the visit_link Lambda issues),
-///   - the path is a single segment `^/[^/]+$`,
+///   - the path is exactly a leading '/' followed by 7 chars matching `^[a-z0-9]{7}$`
+///     (the shape a cuid2 id can have, see `is_short_link_path`),
 ///   - the path is not one of the reserved exact paths, and
 ///   - the path does not start with a reserved prefix.
 ///
 /// Because standard logging covers the ENTIRE distribution (not just the `/?*`
 /// behaviour the old realtime config was scoped to), this filter is load-bearing
-/// (FR-4.4). The link id is `cs-uri-stem` with the leading `/` stripped; any query
-/// string lives in a separate `cs-uri-query` field, so no `?` splitting is needed.
+/// (FR-4.4). The whole distribution is scanned by internet bots probing for files
+/// like `/compose.yaml`, `/stripe-keys.json` or `/phpinfo`; those get a 302 to the
+/// SPA and, under a loose single-segment rule, were classified as clicks and then
+/// failed the `attribute_exists(LinkId)` increment. Requiring the exact cuid2 shape
+/// drops every such probe that carries a dot, hyphen, underscore or the wrong length
+/// before it ever reaches DynamoDB. The link id is `cs-uri-stem` with the leading
+/// '/' stripped; any query string lives in a separate `cs-uri-query` field, so no
+/// '?' splitting is needed.
 pub fn classify(record: &LogRecord) -> Option<String> {
     if record.cs_method != "GET" {
         return None;
@@ -68,10 +79,12 @@ pub fn classify(record: &LogRecord) -> Option<String> {
 
     let path = record.cs_uri_stem.as_str();
 
-    // Single path segment: a leading '/' followed by one or more non-'/' chars.
-    if !is_single_segment(path) {
+    // Must have the exact cuid2 short-link shape: '/' + 7 chars of [a-z0-9].
+    if !is_short_link_path(path) {
         return None;
     }
+    // These can never match a 7-char [a-z0-9] segment, but the exclusions stay as a
+    // deliberate second gate so tightening the shape did not silently drop them.
     if RESERVED_EXACT.contains(&path) {
         return None;
     }
@@ -82,10 +95,20 @@ pub fn classify(record: &LogRecord) -> Option<String> {
     Some(path.trim_start_matches('/').to_string())
 }
 
-/// `^/[^/]+$`: starts with '/', at least one more character, and no further '/'.
-fn is_single_segment(path: &str) -> bool {
+/// `^/[a-z0-9]{7}$`: a leading '/', then exactly 7 characters each in [a-z0-9].
+///
+/// This is the shape a cuid2 id generated with length 7 can take (lowercase letters
+/// and digits only). It is intentionally a shape check, not a table lookup: a path
+/// that happens to be 7 lowercase alphanumerics but is not a real id (say `phpinfo`)
+/// still fails the downstream `attribute_exists(LinkId)` condition quietly, and
+/// chasing those with a bot blocklist would be over-engineering. The job here is only
+/// to exclude the obvious non-ids (dots, hyphens, underscores, wrong length).
+fn is_short_link_path(path: &str) -> bool {
     match path.strip_prefix('/') {
-        Some(rest) => !rest.is_empty() && !rest.contains('/'),
+        Some(rest) => {
+            rest.len() == SHORT_LINK_LEN
+                && rest.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        }
         None => false,
     }
 }
@@ -150,8 +173,8 @@ mod tests {
     #[test]
     fn valid_short_link_302_get_is_counted() {
         assert_eq!(
-            classify(&record("GET", "302", "/k120oizr")),
-            Some("k120oizr".to_string())
+            classify(&record("GET", "302", "/k3m9x2p")),
+            Some("k3m9x2p".to_string())
         );
     }
 
@@ -188,23 +211,66 @@ mod tests {
 
     #[test]
     fn a_404_on_a_short_path_is_not_counted() {
-        assert_eq!(classify(&record("GET", "404", "/k120oizr")), None);
+        assert_eq!(classify(&record("GET", "404", "/k3m9x2p")), None);
     }
 
     #[test]
     fn a_200_on_a_short_path_is_not_counted() {
-        assert_eq!(classify(&record("GET", "200", "/k120oizr")), None);
+        assert_eq!(classify(&record("GET", "200", "/k3m9x2p")), None);
     }
 
     #[test]
     fn a_head_302_is_not_counted() {
-        assert_eq!(classify(&record("HEAD", "302", "/k120oizr")), None);
+        assert_eq!(classify(&record("HEAD", "302", "/k3m9x2p")), None);
     }
 
     #[test]
     fn a_multi_segment_path_is_not_counted() {
         // Not a single short-link segment, so it cannot be a link id.
         assert_eq!(classify(&record("GET", "302", "/foo/bar")), None);
+    }
+
+    // The following prove the tightened `^/[a-z0-9]{7}$` rule: internet scanner probes
+    // observed in production get a 302 to the SPA but must classify as None so they
+    // never reach the `attribute_exists(LinkId)` increment and never trip the alarm.
+
+    #[test]
+    fn a_dotted_probe_is_not_counted() {
+        // '/compose.yaml' has a dot and wrong length; the dot alone excludes it.
+        assert_eq!(classify(&record("GET", "302", "/compose.yaml")), None);
+    }
+
+    #[test]
+    fn a_json_probe_is_not_counted() {
+        assert_eq!(classify(&record("GET", "302", "/stripe-keys.json")), None);
+    }
+
+    #[test]
+    fn an_underscore_probe_is_not_counted() {
+        // '/nginx_status': underscore is not in [a-z0-9], so it is rejected on shape.
+        assert_eq!(classify(&record("GET", "302", "/nginx_status")), None);
+    }
+
+    #[test]
+    fn a_multi_dot_probe_is_not_counted() {
+        assert_eq!(
+            classify(&record("GET", "302", "/terraform.tfstate.backup")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_wrong_length_alphanumeric_path_is_not_counted() {
+        // Six chars: too short for a cuid2 id even though every char is in [a-z0-9].
+        assert_eq!(classify(&record("GET", "302", "/abc123")), None);
+        // Eight chars: too long.
+        assert_eq!(classify(&record("GET", "302", "/abcd1234")), None);
+    }
+
+    #[test]
+    fn an_uppercase_path_is_not_counted() {
+        // cuid2 output is lowercase only; an uppercase segment is not a valid id shape.
+        assert_eq!(classify(&record("GET", "302", "/Abc1234")), None);
     }
 
     #[test]
@@ -217,9 +283,9 @@ mod tests {
             "\n",
             "{\"cs-method\":\"GET\",\"sc-status\":\"302\",\"cs-uri-str",
             "\n",
-            "{\"cs-method\":\"GET\",\"sc-status\":\"302\",\"cs-uri-stem\":\"/k120oizr\",\"timestamp(ms)\":\"1739035776180\",\"c-country\":\"US\"}\n",
+            "{\"cs-method\":\"GET\",\"sc-status\":\"302\",\"cs-uri-stem\":\"/k3m9x2p\",\"timestamp(ms)\":\"1739035776180\",\"c-country\":\"US\"}\n",
         );
-        assert_eq!(parse_log_object(object), vec!["k120oizr".to_string()]);
+        assert_eq!(parse_log_object(object), vec!["k3m9x2p".to_string()]);
     }
 
     #[test]

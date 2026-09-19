@@ -66,12 +66,15 @@ pub async fn function_handler(
         // Gate the aggregate on the claim result through the tested pure seam.
         let counts = plan_increments(claimed, &link_ids);
 
-        // One UpdateItem per distinct link. A per-link failure warns (feeds the alarm,
-        // FR-9) and does not abort the batch.
+        // One UpdateItem per distinct link. A link that is valid-shaped but no longer
+        // in the table is skipped silently inside increment_click_count_by (the
+        // designed no-op), so the only errors that reach here are UNEXPECTED data
+        // store failures. Those warn (feeding the alarm, FR-9) and do not abort the
+        // batch.
         for (link_id, count) in counts {
             if let Err(e) = url_shortener.increment_click_count_by(&link_id, count).await {
                 tracing::warn!(
-                    "Failed to increment click count for {} by {}: {:?}",
+                    "Unexpected failure incrementing click count for {} by {}: {:?}",
                     link_id,
                     count,
                     e

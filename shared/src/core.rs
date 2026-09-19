@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use aws_sdk_dynamodb::operation::put_item::PutItemError;
+use aws_sdk_dynamodb::operation::update_item::UpdateItemError;
 use aws_sdk_dynamodb::types::{AttributeValue, ReturnValue};
 use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::error::SdkError;
@@ -347,6 +348,18 @@ impl UrlShortener {
     /// This is what lets one log object with K hits on a link cost ONE write instead
     /// of K (FR-7). `increment_click_count` is kept as the natural unit-of-one API and
     /// keeps its existing call sites and tests.
+    ///
+    /// Error handling distinguishes the two failure modes on purpose. A
+    /// `ConditionalCheckFailedException` means the `attribute_exists(LinkId)` guard
+    /// found no such link: the id was valid-SHAPED (the tightened parser only emits
+    /// `^/[a-z0-9]{7}$` paths) but is not in the table, i.e. a since-deleted link. That
+    /// is the designed skip-not-fail outcome, not a problem, so it is logged at `debug`
+    /// and returns `Ok(())` -- it must NOT surface as a warn, or the process_analytics
+    /// invalidUrlAlarm would fire on ordinary deleted-link traffic. Every OTHER SDK
+    /// error (throttling, an IAM problem, a network fault) is genuinely unexpected, so
+    /// it is logged at `error` and returned as `AppError::database` for the caller to
+    /// warn on. Only this batch path calls `increment_click_count_by`, so scoping the
+    /// downgrade here cannot silence a warn on any other code path.
     pub async fn increment_click_count_by(
         &self,
         short_url: &str,
@@ -365,11 +378,26 @@ impl UrlShortener {
             .await;
 
         match result {
+            Ok(_) => Ok(()),
+            // Expected: the link is valid-shaped but not in the table (deleted). The
+            // increment is a no-op by design; skip quietly so the alarm is not tripped.
+            Err(SdkError::ServiceError(err))
+                if matches!(
+                    err.err(),
+                    UpdateItemError::ConditionalCheckFailedException(_)
+                ) =>
+            {
+                tracing::debug!(
+                    "Skipping click increment for {}: link not found (since deleted)",
+                    short_url
+                );
+                Ok(())
+            }
+            // Unexpected data store error: this is a genuine signal, keep it loud.
             Err(e) => {
                 tracing::error!("Error incrementing clicks: {:?}", e);
                 Err(AppError::database(e))
             }
-            Ok(_) => Ok(()),
         }
     }
 
