@@ -133,23 +133,24 @@ describe('KrtkRsStack', () => {
       expect(withSecret).toHaveLength(1);
     });
 
-    test('processAnalytics is triggered by an S3 notification, not an event source mapping', () => {
+    test('processAnalytics is triggered by an S3 notification on the v2 delivery prefix', () => {
       // The S3 event source is a bucket notification (a custom resource), not an
-      // AWS::Lambda::EventSourceMapping. Assert both: no ESM anywhere (nothing polls a
-      // stream), and a bucket notification configuration exists that targets a Lambda.
+      // AWS::Lambda::EventSourceMapping. CloudWatch vended delivery always writes
+      // CloudFront v2 objects below AWSLogs/<account>/CloudFront/, so a generic or
+      // invented prefix would silently drop every object before Lambda sees it.
       template.resourceCountIs('AWS::Lambda::EventSourceMapping', 0);
 
       const notifications = template.findResources('Custom::S3BucketNotifications');
       expect(Object.keys(notifications).length).toBeGreaterThanOrEqual(1);
 
-      const targetsLambda = Object.values(notifications).some((n) => {
-        const config = (n as any).Properties.NotificationConfiguration;
-        const lambdaConfigs = config?.LambdaFunctionConfigurations ?? [];
-        return lambdaConfigs.some((c: any) =>
-          (c.Events ?? []).some((e: string) => e.startsWith('s3:ObjectCreated')),
-        );
-      });
-      expect(targetsLambda).toBe(true);
+      // Assert the rendered custom-resource payload, not its in-memory token shape.
+      // CDK represents the account segment as a Fn::Join, while S3 resolves it to the
+      // literal account id before comparing object keys.
+      const renderedNotification = JSON.stringify(notifications);
+      expect(renderedNotification).toContain('s3:ObjectCreated:*');
+      expect(renderedNotification).toContain('AWSLogs/');
+      expect(renderedNotification).toContain('AWS::AccountId');
+      expect(renderedNotification).toContain('/CloudFront/');
     });
   });
 

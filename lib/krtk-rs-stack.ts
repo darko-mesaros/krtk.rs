@@ -36,11 +36,12 @@ const SITE_DOMAIN = 'krtk.rs';
 /** Where the Cognito Hosted UI is served, so a password is never typed into an AWS hostname. */
 const AUTH_DOMAIN = `auth.${SITE_DOMAIN}`;
 /**
- * Key prefix under which CloudFront delivers standard access-log objects. The delivery
- * bucket policy scopes `s3:PutObject` to this prefix and the S3 event source filters on
- * it, so the two must stay in agreement.
+ * CloudWatch vended delivery writes CloudFront v2 objects under this fixed S3 path.
+ * The account segment is required: the delivery service's suffix is
+ * `AWSLogs/{account-id}/CloudFront/`. The bucket policy and S3 event filter must use
+ * this exact prefix or objects land successfully but never invoke analytics.
  */
-const CF_LOG_PREFIX = 'cf-access-logs';
+const CF_LOG_PREFIX = `AWSLogs/${cdk.Aws.ACCOUNT_ID}/CloudFront`;
 
 interface KrtkRsStackProps extends cdk.StackProps {
   certificateArn: string;
