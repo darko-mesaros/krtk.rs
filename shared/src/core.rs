@@ -335,7 +335,95 @@ impl UrlShortener {
         }
     }
 
-    /// Lists the links owned by `owner_sub`, newest first.
+    /// Increment a link's click count by `by` in a single `UpdateItem`.
+    ///
+    /// Identical to `increment_click_count` in every safety property -- it keeps the
+    /// `SET Clicks = Clicks + :val` expression, the `attribute_exists(LinkId)` guard
+    /// (so an increment for a since-deleted link is skipped, not created, FR-2.4),
+    /// the `ReturnValue::AllNew`, and the opaque `AppError::database` mapping ("Data
+    /// store operation failed", names no backend service, FR-10.3). The only
+    /// difference is `:val` carries the aggregated per-file hit count instead of 1.
+    ///
+    /// This is what lets one log object with K hits on a link cost ONE write instead
+    /// of K (FR-7). `increment_click_count` is kept as the natural unit-of-one API and
+    /// keeps its existing call sites and tests.
+    pub async fn increment_click_count_by(
+        &self,
+        short_url: &str,
+        by: u64,
+    ) -> Result<(), AppError> {
+        let result = self
+            .dynamodb_client
+            .update_item()
+            .table_name(&self.dynamodb_urls_table)
+            .key("LinkId", AttributeValue::S(short_url.to_string()))
+            .update_expression("SET Clicks = Clicks + :val")
+            .expression_attribute_values(":val", AttributeValue::N(by.to_string()))
+            .condition_expression("attribute_exists(LinkId)")
+            .return_values(ReturnValue::AllNew)
+            .send()
+            .await;
+
+        match result {
+            Err(e) => {
+                tracing::error!("Error incrementing clicks: {:?}", e);
+                Err(AppError::database(e))
+            }
+            Ok(_) => Ok(()),
+        }
+    }
+
+    /// Atomically claims an S3 log object for processing, returning whether THIS
+    /// caller won the claim.
+    ///
+    /// The idempotency guard for at-least-once S3 delivery (FR-5). It writes a marker
+    /// row `LinkId = "PROCESSED#<object-key>"` with a conditional
+    /// `attribute_not_exists(LinkId)`, so exactly one invocation can ever create it:
+    ///   - `Ok(true)`  -- the marker did not exist; this invocation owns the object
+    ///                    and should process it.
+    ///   - `Ok(false)` -- the marker already existed (`ConditionalCheckFailedException`);
+    ///                    the object was already claimed, so skip it entirely.
+    ///   - `Err(_)`    -- any other failure, mapped through the opaque `AppError::database`.
+    ///
+    /// Claimed BEFORE processing, so a mid-file crash LOSES the un-applied increments
+    /// rather than re-running the file and double-counting -- under-counting is
+    /// acceptable, double-counting is not (FR-5.2, FR-5.3).
+    ///
+    /// The marker carries a `TtlExpiresAt` ~30 days out so markers self-expire in step
+    /// with the log bucket's 30-day retention (a marker is useless once its object is
+    /// gone). It deliberately writes NO `SortKey` attribute, so the row never enters
+    /// the `TimeStampIndex` GSI (whose partition key is `SortKey`) and therefore can
+    /// never appear in `list_urls`. The `PROCESSED#` prefix also cannot collide with a
+    /// real cuid2 link id (7 lowercase alphanumerics, no `#`).
+    pub async fn claim_log_object(&self, object_key: &str) -> Result<bool, AppError> {
+        // ~30 days out, aligned with the log bucket lifecycle. Unix seconds, matching
+        // the apiKeyTable TTL convention elsewhere in the project.
+        let ttl = (Utc::now() + chrono::Duration::days(30)).timestamp();
+
+        let result = self
+            .dynamodb_client
+            .put_item()
+            .table_name(&self.dynamodb_urls_table)
+            .item("LinkId", AttributeValue::S(format!("PROCESSED#{object_key}")))
+            .item("TtlExpiresAt", AttributeValue::N(ttl.to_string()))
+            .condition_expression("attribute_not_exists(LinkId)")
+            .send()
+            .await;
+
+        match result {
+            Ok(_) => Ok(true),
+            Err(SdkError::ServiceError(err))
+                if matches!(err.err(), PutItemError::ConditionalCheckFailedException(_)) =>
+            {
+                // Already claimed by a prior delivery of the same object. Not an error.
+                Ok(false)
+            }
+            Err(e) => {
+                tracing::error!("Error claiming log object: {:?}", e);
+                Err(AppError::database(e))
+            }
+        }
+    }
     ///
     /// Scoping is enforced by the query itself: the `TimeStampIndex` partition key is
     /// the owner key, so another user's items are not merely filtered out — they are

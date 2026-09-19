@@ -99,8 +99,9 @@ After deployment, you can use the URL shortener by:
 2. User visits a short link:
    - Request is routed through CloudFront to API Gateway
    - `visit_link` Lambda function looks up the original URL in DynamoDB and returns the original link.
-   - The realtime log is sent from *CloudFront* to a Kinesis stream.
-   - The `process_analytics` function increments the visit count.
+   - CloudFront writes a standard access-log file (gzipped JSON) to the log bucket.
+   - The resulting S3 `ObjectCreated` event invokes `process_analytics`, which filters the log to short-link 302s, aggregates hits per link, and increments `Clicks` (one write per distinct link). A per-object marker in DynamoDB makes reprocessing idempotent.
+   - Click counts lag the visit by seconds to minutes (CloudFront delivers access-log files roughly every few minutes, up to about an hour worst case). This is an expected property of standard logging, not a regression: the redirect itself is unaffected.
 
 3. Retrieving list of links:
    - Frontend JavaScript sends a GET request to `/api/links`
@@ -108,10 +109,10 @@ After deployment, you can use the URL shortener by:
    - Response with list of links is sent back and displayed on the frontend
 
 ```
-            [Kinesis] ------------------------+
-                ^                             |
-                |                             v
-[User] -> [CloudFront] -> [API Gateway] -> [Lambda] <-> [DynamoDB]
+       [S3 access logs] --(ObjectCreated)--+
+                ^                           |
+                |                           v
+[User] > [CloudFront] > [API Gateway] > [Lambda] <> [DynamoDB]
   ^           |
   |           v
   +--- [S3 (Static Website)]
@@ -127,19 +128,17 @@ The project uses AWS CDK to define and deploy the following resources:
   - `createLink`: Creates new short links
   - `getLinks`: Retrieves list of links
   - `visitLink`: Handles link visits and redirects
-  - `processAnalyticsLambda`: Handles the CF access logs from kinesis
+  - `processAnalyticsLambda`: consumes CloudFront S3 access logs on ObjectCreated and increments click counts
 
 - DynamoDB:
   - `linkTable`: Stores short link data
 
 - S3:
   - `hostingBucket`: Hosts the static website files
+  - `cfLogBucket`: CloudFront access logs, 30-day expiry
 
 - CloudFront:
   - Distribution for serving the website and API
-
-- Kinesis:
-  - Receving realtime acces logs from CloudFront
 
 - API Gateway:
   - HTTP API for handling link operations

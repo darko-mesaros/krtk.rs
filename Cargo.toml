@@ -25,7 +25,12 @@ aws-sdk-dynamodb = { version = "1", default-features = false, features = ["defau
 aws-sdk-secretsmanager = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-aws_lambda_events = { version = "1", default-features = false, features = ["kinesis"] }
+aws_lambda_events = { version = "1", default-features = false, features = ["s3"] }
+# Same modern-TLS pattern as the DynamoDB SDK above: drop the legacy rustls default and use
+# the `default-https-client` (rustls-aws-lc) stack that BehaviorVersion v2026_01_12 selects.
+aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+# CloudFront standard access-log objects arrive gzipped; GzDecoder inflates them.
+flate2 = "1"
 # reqwest 0.13 renamed `rustls-tls` -> `rustls` and split the root store out into its own
 # feature. `webpki-roots` preserves 0.12's `rustls-tls` behaviour (bundled Mozilla root store)
 # rather than depending on whatever cert store the Lambda image ships.
