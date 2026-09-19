@@ -3,6 +3,7 @@ import { Template, Match } from 'aws-cdk-lib/assertions';
 import { KrtkRsStack } from '../lib/krtk-rs-stack';
 import { CertificateStack } from '../lib/certificate-stack';
 import { SecretsStack } from '../lib/secrets-stack';
+import { LogDeliveryStack } from '../lib/log-delivery-stack';
 
 const TEST_ENV = { account: '123456789012', region: 'us-west-2' };
 
@@ -132,12 +133,24 @@ describe('KrtkRsStack', () => {
       expect(withSecret).toHaveLength(1);
     });
 
-    test('processAnalytics is wired to the Kinesis stream via an event source mapping', () => {
-      template.resourceCountIs('AWS::Lambda::EventSourceMapping', 1);
-      template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
-        BatchSize: 1,
-        StartingPosition: 'TRIM_HORIZON',
-      });
+    test('processAnalytics is triggered by an S3 notification on the v2 delivery prefix', () => {
+      // The S3 event source is a bucket notification (a custom resource), not an
+      // AWS::Lambda::EventSourceMapping. CloudWatch vended delivery always writes
+      // CloudFront v2 objects below AWSLogs/<account>/CloudFront/, so a generic or
+      // invented prefix would silently drop every object before Lambda sees it.
+      template.resourceCountIs('AWS::Lambda::EventSourceMapping', 0);
+
+      const notifications = template.findResources('Custom::S3BucketNotifications');
+      expect(Object.keys(notifications).length).toBeGreaterThanOrEqual(1);
+
+      // Assert the rendered custom-resource payload, not its in-memory token shape.
+      // CDK represents the account segment as a Fn::Join, while S3 resolves it to the
+      // literal account id before comparing object keys.
+      const renderedNotification = JSON.stringify(notifications);
+      expect(renderedNotification).toContain('s3:ObjectCreated:*');
+      expect(renderedNotification).toContain('AWSLogs/');
+      expect(renderedNotification).toContain('AWS::AccountId');
+      expect(renderedNotification).toContain('/CloudFront/');
     });
   });
 
@@ -329,12 +342,13 @@ describe('KrtkRsStack', () => {
       });
     });
 
-    test('attaches the realtime log config to the link-redirect behaviour', () => {
-      template.resourceCountIs('AWS::CloudFront::RealtimeLogConfig', 1);
+    test('no realtime log config remains on the link-redirect behaviour', () => {
+      template.resourceCountIs('AWS::CloudFront::RealtimeLogConfig', 0);
       const distributions = template.findResources('AWS::CloudFront::Distribution');
       const config = (Object.values(distributions)[0] as any).Properties.DistributionConfig;
       const redirectBehavior = config.CacheBehaviors.find((b: any) => b.PathPattern === '/?*');
-      expect(redirectBehavior.RealtimeLogConfigArn).toBeDefined();
+      expect(redirectBehavior).toBeDefined();
+      expect(redirectBehavior.RealtimeLogConfigArn).toBeUndefined();
     });
 
     test('forces text/html on the extensionless /terms, /privacy and callback objects', () => {
@@ -538,13 +552,81 @@ describe('KrtkRsStack', () => {
     });
   });
 
-  describe('Kinesis analytics stream', () => {
-    test('creates an on-demand stream with 24h retention', () => {
-      template.resourceCountIs('AWS::Kinesis::Stream', 1);
-      template.hasResourceProperties('AWS::Kinesis::Stream', {
-        RetentionPeriodHours: 24,
-        StreamModeDetails: { StreamMode: 'ON_DEMAND' },
+  describe('CloudFront access-log bucket', () => {
+    // The log bucket has no fixed BucketName (unlike the 'krtk.rs' hosting bucket) and
+    // carries a lifecycle rule, ownership controls, and public-access block. Find it by
+    // its lifecycle configuration, which the hosting bucket does not have.
+    function logBucket(): any {
+      const buckets = template.findResources('AWS::S3::Bucket');
+      const found = Object.values(buckets).find(
+        (b) => (b as any).Properties.LifecycleConfiguration !== undefined,
+      );
+      expect(found).toBeDefined();
+      return found;
+    }
+
+    test('blocks all public access', () => {
+      const props = logBucket().Properties;
+      expect(props.PublicAccessBlockConfiguration).toEqual({
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
       });
+    });
+
+    test('disables ACLs with BucketOwnerEnforced ownership', () => {
+      const props = logBucket().Properties;
+      const rules = props.OwnershipControls?.Rules ?? [];
+      expect(rules).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ObjectOwnership: 'BucketOwnerEnforced' }),
+        ]),
+      );
+    });
+
+    test('expires log objects after 30 days', () => {
+      const props = logBucket().Properties;
+      const rules = props.LifecycleConfiguration.Rules;
+      expect(rules).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ ExpirationInDays: 30, Status: 'Enabled' }),
+        ]),
+      );
+    });
+
+    test('stays disposable (DeletionPolicy Delete)', () => {
+      expect(logBucket().DeletionPolicy).toBe('Delete');
+    });
+
+    test('is not versioned, so lifecycle expiry actually removes objects', () => {
+      expect(logBucket().Properties.VersioningConfiguration).toBeUndefined();
+    });
+
+    test('allows the log-delivery service to PutObject with the SourceAccount condition', () => {
+      // Find the log bucket's policy: the one that grants delivery.logs.amazonaws.com.
+      const policies = template.findResources('AWS::S3::BucketPolicy');
+      const deliveryStatements: any[] = [];
+      for (const policy of Object.values(policies)) {
+        const statements = (policy as any).Properties.PolicyDocument.Statement;
+        for (const s of statements) {
+          if (s.Principal?.Service === 'delivery.logs.amazonaws.com') {
+            deliveryStatements.push(s);
+          }
+        }
+      }
+      expect(deliveryStatements.length).toBe(1);
+
+      const stmt = deliveryStatements[0];
+      expect(stmt.Effect).toBe('Allow');
+      expect(stmt.Action).toBe('s3:PutObject');
+      expect(stmt.Condition?.StringEquals?.['aws:SourceAccount']).toBeDefined();
+    });
+  });
+
+  describe('Kinesis is fully removed', () => {
+    test('the template contains no Kinesis stream', () => {
+      template.resourceCountIs('AWS::Kinesis::Stream', 0);
     });
   });
 
@@ -785,6 +867,56 @@ describe('CertificateStack', () => {
       env: { ...TEST_ENV, region: 'us-east-1' },
     });
 
+    expect(stack.region).toBe('us-east-1');
+  });
+});
+
+describe('LogDeliveryStack', () => {
+  function synthLogDeliveryStack(): Template {
+    const app = new cdk.App();
+    const stack = new LogDeliveryStack(app, 'TestLogDeliveryStack', {
+      env: { ...TEST_ENV, region: 'us-east-1' },
+      crossRegionReferences: true,
+      distributionArn: 'arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE',
+      logBucketArn: 'arn:aws:s3:::test-cf-log-bucket',
+    });
+    return Template.fromStack(stack);
+  }
+
+  test('declares one CloudFront ACCESS_LOGS delivery source', () => {
+    const template = synthLogDeliveryStack();
+    template.resourceCountIs('AWS::Logs::DeliverySource', 1);
+    template.hasResourceProperties('AWS::Logs::DeliverySource', {
+      LogType: 'ACCESS_LOGS',
+      ResourceArn: 'arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE',
+    });
+  });
+
+  test('declares one JSON delivery destination pointed at the log bucket', () => {
+    const template = synthLogDeliveryStack();
+    template.resourceCountIs('AWS::Logs::DeliveryDestination', 1);
+    template.hasResourceProperties('AWS::Logs::DeliveryDestination', {
+      OutputFormat: 'json',
+      DestinationResourceArn: 'arn:aws:s3:::test-cf-log-bucket',
+    });
+  });
+
+  test('declares one delivery with the expected record fields', () => {
+    const template = synthLogDeliveryStack();
+    template.resourceCountIs('AWS::Logs::Delivery', 1);
+    template.hasResourceProperties('AWS::Logs::Delivery', {
+      RecordFields: ['cs-method', 'sc-status', 'cs-uri-stem', 'timestamp(ms)', 'c-country'],
+    });
+  });
+
+  test('is pinned to us-east-1, which the delivery API requires', () => {
+    const app = new cdk.App();
+    const stack = new LogDeliveryStack(app, 'TestLogDeliveryStack', {
+      env: { ...TEST_ENV, region: 'us-east-1' },
+      crossRegionReferences: true,
+      distributionArn: 'arn:aws:cloudfront::123456789012:distribution/E1EXAMPLE',
+      logBucketArn: 'arn:aws:s3:::test-cf-log-bucket',
+    });
     expect(stack.region).toBe('us-east-1');
   });
 });

@@ -12,13 +12,13 @@ import { HostedZone, ARecord, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { Certificate} from 'aws-cdk-lib/aws-certificatemanager';
 import { TableV2, AttributeType, ProjectionType } from 'aws-cdk-lib/aws-dynamodb';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
-import { Bucket, BlockPublicAccess } from 'aws-cdk-lib/aws-s3';
+import { Bucket, BlockPublicAccess, ObjectOwnership, EventType } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
-import { Endpoint, RealtimeLogConfig, AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
+import { AllowedMethods, CachePolicy, Distribution, OriginProtocolPolicy, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
-import { Stream, StreamMode } from 'aws-cdk-lib/aws-kinesis';
-import { KinesisEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
-import { Architecture, LoggingFormat, StartingPosition } from 'aws-cdk-lib/aws-lambda';
+import { S3EventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { Architecture, LoggingFormat } from 'aws-cdk-lib/aws-lambda';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Alarm, ComparisonOperator, TreatMissingData } from 'aws-cdk-lib/aws-cloudwatch';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
@@ -35,6 +35,13 @@ import { UserPoolDomainTarget } from 'aws-cdk-lib/aws-route53-targets';
 const SITE_DOMAIN = 'krtk.rs';
 /** Where the Cognito Hosted UI is served, so a password is never typed into an AWS hostname. */
 const AUTH_DOMAIN = `auth.${SITE_DOMAIN}`;
+/**
+ * CloudWatch vended delivery writes CloudFront v2 objects under this fixed S3 path.
+ * The account segment is required: the delivery service's suffix is
+ * `AWSLogs/{account-id}/CloudFront/`. The bucket policy and S3 event filter must use
+ * this exact prefix or objects land successfully but never invoke analytics.
+ */
+const CF_LOG_PREFIX = `AWSLogs/${cdk.Aws.ACCOUNT_ID}/CloudFront`;
 
 interface KrtkRsStackProps extends cdk.StackProps {
   certificateArn: string;
@@ -44,6 +51,17 @@ interface KrtkRsStackProps extends cdk.StackProps {
 }
 
 export class KrtkRsStack extends cdk.Stack {
+  /**
+   * ARN of the CloudFront distribution, in the global format
+   * `arn:<partition>:cloudfront::<account>:distribution/<id>`. Exposed so the
+   * us-east-1 `LogDeliveryStack` can name it as the v2 delivery source (the delivery
+   * API must run in us-east-1, so the constructs live in a separate stack wired via
+   * crossRegionReferences, mirroring CertificateStack).
+   */
+  public readonly distributionArn: string;
+  /** ARN of the CloudFront access-log bucket, consumed as the v2 delivery destination. */
+  public readonly logBucketArn: string;
+
   constructor(scope: Construct, id: string, props: KrtkRsStackProps) {
     super(scope, id, props);
 
@@ -75,26 +93,42 @@ export class KrtkRsStack extends cdk.Stack {
     // One OAC-backed origin instance, shared by every S3 behaviour on the distribution.
     const s3Origin = S3BucketOrigin.withOriginAccessControl(hostingBucket);
 
-    // Kinesis stream for analytics
-    const cfAnalyticsStream = new Stream(this, 'cfAnalyticsStream', {
-       streamMode: StreamMode.ON_DEMAND,
-      retentionPeriod: cdk.Duration.hours(24)
+    // CloudFront access-log bucket. Standard logging v2 (CloudWatch vended delivery)
+    // writes gzipped JSON log objects here; the process_analytics Lambda consumes them
+    // on ObjectCreated. Separate from hostingBucket (which is public-facing content
+    // behind OAC).
+    //
+    // BUCKET_OWNER_ENFORCED disables ACLs entirely, which is what lets v2 delivery work
+    // through a bucket policy rather than the ACL relaxation v1 logging would have forced
+    // against this project's BLOCK_ALL + enforceSSL posture. No versioning: versioned log
+    // objects would defeat lifecycle expiry. DESTROY + autoDeleteObjects because logs are
+    // reproducible, disposable telemetry (same reasoning as hostingBucket).
+    const cfLogBucket = new Bucket(this, 'cfLogBucket', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      lifecycleRules: [{ expiration: cdk.Duration.days(30) }],
     });
+    this.logBucketArn = cfLogBucket.bucketArn;
 
-    // Real time Analytics streaming configuration
-    const realTimeConfig = new RealtimeLogConfig(this, 'realTimeConfig',{
-      endPoints: [
-        Endpoint.fromKinesisStream(cfAnalyticsStream),
-      ],
-      fields: [
-        'timestamp',
-        'c-ip',
-        'cs-uri-stem',
-        'sc-status',
-      ],
-      realtimeLogConfigName: 'krtkAnalytics',
-      samplingRate: 100,
-    });
+    // Vended log delivery writes as the `delivery.logs.amazonaws.com` service principal,
+    // not via ACLs. CDK/CFN does not add this the way the console does, so it is explicit.
+    // Scoped to the log prefix, to this account, and requiring the bucket-owner-full-control
+    // canned ACL that the delivery service sets on every object.
+    cfLogBucket.addToResourcePolicy(new PolicyStatement({
+      effect: Effect.ALLOW,
+      principals: [new ServicePrincipal('delivery.logs.amazonaws.com')],
+      actions: ['s3:PutObject'],
+      resources: [`${cfLogBucket.bucketArn}/${CF_LOG_PREFIX}/*`],
+      conditions: {
+        StringEquals: {
+          'aws:SourceAccount': this.account,
+          's3:x-amz-acl': 'bucket-owner-full-control',
+        },
+      },
+    }));
 
     // DynamoDB — this holds user data (and is about to hold per-user link ownership),
     // so it is protected against accidental teardown: RETAIN keeps the table if the stack
@@ -379,12 +413,14 @@ export class KrtkRsStack extends cdk.Stack {
         SHORTENER_DOMAIN: 'krtk.rs',
       }
     });
-    // Give Function permission to Kinesis
-    cfAnalyticsStream.grantRead(processAnalyticsLambda);
-    // ESM for Kinesis
-    processAnalyticsLambda.addEventSource(new KinesisEventSource(cfAnalyticsStream,{
-      batchSize: 1,
-      startingPosition: StartingPosition.TRIM_HORIZON,
+    // Read the delivered log objects; write click counts and idempotency markers to the
+    // link table (grantWriteData covers the marker PutItem too, same table).
+    cfLogBucket.grantRead(processAnalyticsLambda);
+    // ObjectCreated on the log prefix invokes the function. The S3 event and its target
+    // Lambda share this region; the prefix matches the delivery bucket policy above.
+    processAnalyticsLambda.addEventSource(new S3EventSource(cfLogBucket, {
+      events: [EventType.OBJECT_CREATED],
+      filters: [{ prefix: `${CF_LOG_PREFIX}/` }],
     }));
     linkDatabase.grantWriteData(processAnalyticsLambda);
 
@@ -599,7 +635,6 @@ export class KrtkRsStack extends cdk.Stack {
           allowedMethods: AllowedMethods.ALLOW_ALL,
           cachePolicy: CachePolicy.CACHING_DISABLED,
           originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-          realtimeLogConfig: realTimeConfig,
         },
       },
       certificate: cert,
@@ -675,10 +710,14 @@ export class KrtkRsStack extends cdk.Stack {
       evaluationPeriods: 1,
       comparisonOperator: ComparisonOperator.GREATER_THAN_THRESHOLD,
       treatMissingData: TreatMissingData.NOT_BREACHING,
-      alarmDescription: 'Alarm when too many invalid URLs are processed'
+      alarmDescription: 'Alarm when process_analytics logs too many unexpected increment failures (warn). Valid-shaped but deleted links are skipped at debug and do not count; a warn now means an unexpected data store error.'
     });
 
     // Outputs
+    // CloudFront distribution ARNs are global (no region segment), so the delivery stack
+    // in us-east-1 can reference this us-west-2 distribution without a region mismatch.
+    this.distributionArn = `arn:${this.partition}:cloudfront::${this.account}:distribution/${cdn.distributionId}`;
+
     new cdk.CfnOutput(this, 'distributionId',{
       value: cdn.distributionId,
       description: 'CDN ID'
