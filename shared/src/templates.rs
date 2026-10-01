@@ -155,6 +155,21 @@ mod tests {
         assert!(!rendered.contains("All items loaded"));
     }
 
+    /// Titles are now caller-supplied via the API (not only scraped), so the links
+    /// table is a stored-XSS sink unless Askama escapes them. Pin that it does.
+    #[test]
+    fn links_table_escapes_a_caller_supplied_title() {
+        let table = LinksTable {
+            links: vec![link(Some("shuk: <img src=x onerror=alert(1)>.txt"), "abc1234", 0, 1_739_035_776)],
+            domain: "krtk.rs/",
+            has_more: false,
+        };
+
+        let rendered = table.render().expect("LinksTable should render");
+        assert!(!rendered.contains("<img"), "title markup was not escaped: {rendered}");
+        assert!(rendered.contains("&#60;img") || rendered.contains("&lt;img"));
+    }
+
     #[test]
     fn new_short_link_renders_the_full_url() {
         let rendered = NewShortLink { link: "abc1234".to_string(), domain: "krtk.rs/" }
