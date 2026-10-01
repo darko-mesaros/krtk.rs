@@ -38,6 +38,35 @@ pub fn owner_key(owner_sub: &str) -> String {
 #[derive(Deserialize)]
 pub struct ShortenUrlRequest {
     url_to_shorten: String,
+    /// Optional caller-supplied title. When present it takes precedence over the
+    /// `<title>` scraped from the target page, so API clients (e.g. `shuk`, whose
+    /// targets are presigned S3 objects with no meaningful HTML title) can label
+    /// their links. `#[serde(default)]` keeps the field optional on the wire, so
+    /// existing clients that only send `url_to_shorten` are unaffected.
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// Same cap the scraper applies to `<title>`, so a supplied title can never be
+/// longer than a scraped one and the links table renders both the same way.
+const MAX_TITLE_CHARS: usize = 256;
+
+/// Normalizes a caller-supplied title: strips control characters (newlines, tabs,
+/// NUL...) that would break single-line rendering, trims surrounding whitespace,
+/// truncates to `MAX_TITLE_CHARS` *characters* (not bytes, so a multi-byte UTF-8
+/// filename is never split mid-codepoint), and maps an empty result to `None` so
+/// the scraped title is used instead.
+///
+/// HTML escaping is deliberately NOT done here: Askama escapes on render, and
+/// storing pre-escaped text would double-escape it.
+fn sanitize_title(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.chars().take(MAX_TITLE_CHARS).collect())
+    }
 }
 
 impl ShortenUrlRequest {
@@ -194,10 +223,18 @@ impl UrlShortener {
 
         let short_url = self.generate_short_url();
 
-        let url_details = url_info
+        let mut url_details = url_info
             .fetch_details(&normalized_url)
             .await
             .unwrap_or_default();
+
+        // A caller-supplied title wins over the scraped one. Sanitized here, at the
+        // point of use, rather than in `validate()`: nothing in the types forces
+        // `validate()` to run first, so this is the only place it is guaranteed.
+        // An empty/whitespace-only title sanitizes to None and keeps the scraped one.
+        if let Some(title) = req.title.as_deref().and_then(sanitize_title) {
+            url_details.title = Some(title);
+        }
 
         // Using the DDB Client from the Struct
         //self.dynamodb_client
@@ -763,5 +800,54 @@ mod tests {
         assert!(!is_recursive_url("https://example.com/", "krtk.rs"));
         // A domain that merely ends with ours must not be treated as recursive.
         assert!(!is_recursive_url("https://notkrtk.rs/x", "krtk.rs"));
+    }
+
+    #[test]
+    fn shorten_request_title_is_optional_on_the_wire() {
+        // Existing clients send only url_to_shorten; that must keep deserializing.
+        let legacy: ShortenUrlRequest =
+            serde_json::from_str(r#"{"url_to_shorten":"https://example.com"}"#).unwrap();
+        assert!(legacy.title.is_none());
+
+        let titled: ShortenUrlRequest = serde_json::from_str(
+            r#"{"url_to_shorten":"https://example.com","title":"shuk: report.pdf"}"#,
+        )
+        .unwrap();
+        assert_eq!(titled.title.as_deref(), Some("shuk: report.pdf"));
+
+        let null_title: ShortenUrlRequest =
+            serde_json::from_str(r#"{"url_to_shorten":"https://example.com","title":null}"#)
+                .unwrap();
+        assert!(null_title.title.is_none());
+    }
+
+    #[test]
+    fn sanitize_title_trims_and_drops_empty() {
+        assert_eq!(sanitize_title("  shuk: a.txt  ").as_deref(), Some("shuk: a.txt"));
+        assert_eq!(sanitize_title(""), None);
+        assert_eq!(sanitize_title("   \t\n "), None);
+    }
+
+    #[test]
+    fn sanitize_title_strips_control_characters() {
+        assert_eq!(
+            sanitize_title("shuk:\n evil\r\u{0}name.txt").as_deref(),
+            Some("shuk: evilname.txt")
+        );
+    }
+
+    #[test]
+    fn sanitize_title_caps_length_on_char_boundaries() {
+        // 300 multi-byte chars: a byte-based cut would panic or split a codepoint.
+        let long = "ж".repeat(300);
+        let out = sanitize_title(&long).unwrap();
+        assert_eq!(out.chars().count(), MAX_TITLE_CHARS);
+        assert!(out.chars().all(|c| c == 'ж'));
+    }
+
+    #[test]
+    fn sanitize_title_keeps_markup_verbatim_for_askama_to_escape() {
+        // Escaping on input would double-escape on render.
+        assert_eq!(sanitize_title("<b>x</b>").as_deref(), Some("<b>x</b>"));
     }
 }
